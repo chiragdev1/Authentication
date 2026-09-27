@@ -1,5 +1,6 @@
 import express from 'express'
 import type {Express, Request, Response} from 'express'
+import { authRouter } from './auth/routes.js';
 
 export function createExpressApplication(): Express {
   const app = express()
@@ -7,6 +8,7 @@ export function createExpressApplication(): Express {
   // middlewares
   app.use(express.json({limit: '50kb'}))
 
+  app.use('/auth', authRouter)
 
   // routes
   app.get("/", (req: Request, res: Response)=> {

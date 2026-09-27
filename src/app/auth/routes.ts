@@ -1,0 +1,9 @@
+import express from 'express'
+import type {Router} from 'express'
+import { AuthController } from './controller.js';
+
+export const authRouter: Router = express.Router()
+
+const authController = new AuthController()
+
+authRouter.post('/sign-up', authController.hangleSignup.bind(authController))

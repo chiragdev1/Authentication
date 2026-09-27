@@ -1,4 +1,5 @@
 import "dotenv/config";
-import { drizzle } from "drizzle-orm/node-postgres";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import type { Pool } from "pg";
 
-const db = drizzle(process.env.DATABASE_URL!);
+export const db: NodePgDatabase & { $client: Pool } = drizzle(process.env.DATABASE_URL!);
