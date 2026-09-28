@@ -5,6 +5,7 @@ import { signinPayloadModel, signupPayloadModel } from './models.js';
 import { db } from '../../db/index.js';
 import { usersTable } from '../../db/schema.js';
 import { eq } from 'drizzle-orm';
+import { generateAccessToken, generateRefreshToken } from './utils/jwt-token.js';
 export class AuthController {
   public async hangleSignup(req: Request, res: Response) {
     // validate values from req.body
@@ -62,7 +63,7 @@ export class AuthController {
 
     // check if user with email exist in db
     const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.email, email))
-    console.log('userInDb', userInDb)
+    // console.log('userInDb', userInDb)
 
     // throw error if user not found
     if(!userInDb) {
@@ -80,9 +81,20 @@ export class AuthController {
       return res.status(403).json({message: "Invalid credentials"})
     }
 
-    //todo: generate and assign tokens 
-    //todo: save the refreshToken in db
-    //todo: save the tokens in cookies/response data object
+    // generate and assign tokens 
+    const accessToken = generateAccessToken({userId: userInDb.id})
+    const refreshToken = generateRefreshToken({userId: userInDb.id})
+
+    // save the refreshToken in db
+    const [result] = await db.update(usersTable).set({refreshToken}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
+
+    if(!result) {
+      return res.status(500).json({success: false, message: 'Could not save refresh token'})
+    }
+
+    // save the tokens in cookies/response data object
+    res.cookie('access_token', accessToken, {httpOnly: true, sameSite: 'none', secure: true})
+    res.cookie('refresh_token', refreshToken, {httpOnly: true, sameSite: 'none', secure: true})
 
     // send the response
     return res.status(200).json({

@@ -1,5 +1,7 @@
 import express from 'express'
+import cookieParser from 'cookie-parser'
 import type {Express, Request, Response} from 'express'
+
 import { authRouter } from './auth/routes.js';
 
 export function createExpressApplication(): Express {
@@ -7,6 +9,9 @@ export function createExpressApplication(): Express {
 
   // middlewares
   app.use(express.json({limit: '50kb'}))
+  app.use(express.urlencoded({extended: true}))
+  app.use(express.static('public'))
+  app.use(cookieParser())
 
   app.use('/auth', authRouter)
 
