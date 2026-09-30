@@ -1,20 +1,24 @@
 import type {Request, Response} from 'express'
-import crypto from 'node:crypto'
+import bcrypt from 'bcryptjs'
 
 import { signinPayloadModel, signupPayloadModel } from './models.js';
 import { db } from '../../db/index.js';
 import { usersTable } from '../../db/schema.js';
 import { eq } from 'drizzle-orm';
-import { generateAccessToken, generateRefreshToken } from './utils/jwt-token.js';
+import { generateAccessToken, generateRefreshToken, getTokenExpiry } from './utils/jwt-token.js';
+import { ApiError } from '../../utils/api-error.js';
+import { ApiResponse } from '../../utils/api-response.js';
+import { cookieOptions } from './utils/constants.js';
+
 export class AuthController {
+
   public async handleSignup(req: Request, res: Response) {
     // validate values from req.body
     const validationResult = await signupPayloadModel.safeParseAsync(req.body)
-    // console.log('signupValidationResult' ,validationResult.error)
 
     // if validation failed throw badRequest error
     if(!validationResult.success) {
-      return res.status(400).json({message: validationResult.error.issues})
+      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
     }
 
     const {firstName, lastName, age, email, password} = validationResult.data
@@ -24,12 +28,10 @@ export class AuthController {
 
     // throw error if exists
     if(existingUser.length > 0) {
-      return res.status(400).json({message: 'User already exists'})
+      throw ApiError.conflict('User with this email already exists')
     }
-
-    // create a salt and hash the password with it
-    const salt = crypto.randomBytes(32).toString('hex')
-    const hash = crypto.createHmac('sha256', salt).update(password).digest('hex')
+    // hash the password
+    const hash = await bcrypt.hash(password, 10)
 
     // save the fields to the user
     const [result] = await db.insert(usersTable).values({
@@ -38,15 +40,16 @@ export class AuthController {
       age,
       email,
       password: hash,
-      salt,
-    }).returning({ id: usersTable.id })
+    })
+    .onConflictDoNothing({ target: usersTable.email })
+    .returning({ id: usersTable.id })
 
-    // throw error if user was not created in db
+    // no row returned means another request created this email in the meantime
     if(!result) {
-      return res.status(500).json({message: 'User could not be created'})
+      throw ApiError.conflict('User with this email already exists')
     }
     // return userid in response
-    return res.status(201).json({message: 'User created successfully' , userId: result.id})
+    return ApiResponse.created(res, 'User created successfully', {id: result.id})
   }
 
   public async handleSignin(req: Request, res: Response) {
@@ -55,7 +58,7 @@ export class AuthController {
 
     // throw error if validation failed(400 badRequest)
     if(!validationResult.success) {
-      return res.status(400).json({success: false, message: "Invalid email or password"})
+      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
     }
 
     const {email, password} = validationResult.data
@@ -65,19 +68,16 @@ export class AuthController {
     // console.log('userInDb', userInDb)
 
     // throw error if user not found
-    if(!userInDb) {
-      return res.status(404).json({
-        success: false,
-        message: "User with this email does not exist"
-      })
+    if(!userInDb || !userInDb.password) {
+      throw ApiError.unauthorized('Invalid email or password')
     }
 
     // compare the passwords
-    const hash = crypto.createHmac('sha256', userInDb.salt!).update(password).digest('hex')
+    const isPasswordValid = await bcrypt.compare(password, userInDb.password)
 
     // throw error if password do not match(email or password is invalid)
-    if(hash !== userInDb.password) {
-      return res.status(403).json({message: "Invalid credentials"})
+    if(!isPasswordValid) {
+      throw ApiError.unauthorized('Invalid email or password')
     }
 
     // generate and assign tokens 
@@ -88,18 +88,14 @@ export class AuthController {
     const [result] = await db.update(usersTable).set({refreshToken}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
 
     if(!result) {
-      return res.status(500).json({success: false, message: 'Could not save refresh token'})
+      throw ApiError.internal('Could not save refresh token')
     }
 
     // save the tokens in cookies/response data object
-    res.cookie('access_token', accessToken, {httpOnly: true, sameSite: 'none', secure: true})
-    res.cookie('refresh_token', refreshToken, {httpOnly: true, sameSite: 'none', secure: true})
+    res.cookie('access_token', accessToken, {...cookieOptions, expires: getTokenExpiry(accessToken)})
+    res.cookie('refresh_token', refreshToken, {...cookieOptions, expires: getTokenExpiry(refreshToken)})
 
     // send the response
-    return res.status(200).json({
-      success: true,
-      message: 'user logged in successfully',
-      data: {userId: userInDb.id}
-    })
+    return ApiResponse.ok(res, 'User signed in successfully')
   }
 }

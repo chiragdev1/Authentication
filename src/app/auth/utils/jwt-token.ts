@@ -15,3 +15,9 @@ export function generateRefreshToken(payload: object) {
   const token = jwt.sign(payload, secret, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY as NonNullable<SignOptions['expiresIn']> })
   return token
 }
+
+// read the expiry date from a signed token (used to set cookie expiry)
+export function getTokenExpiry(token: string) {
+  const payload = jwt.decode(token) as jwt.JwtPayload
+  return new Date(payload.exp! * 1000)
+}
