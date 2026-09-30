@@ -6,5 +6,5 @@ export const authRouter: Router = express.Router()
 
 const authController = new AuthController()
 
-authRouter.post('/sign-up', authController.hangleSignup.bind(authController))
+authRouter.post('/sign-up', authController.handleSignup.bind(authController))
 authRouter.post('/sign-in', authController.handleSignin.bind(authController))

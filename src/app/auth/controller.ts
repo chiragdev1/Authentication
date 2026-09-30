@@ -7,7 +7,7 @@ import { usersTable } from '../../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { generateAccessToken, generateRefreshToken } from './utils/jwt-token.js';
 export class AuthController {
-  public async hangleSignup(req: Request, res: Response) {
+  public async handleSignup(req: Request, res: Response) {
     // validate values from req.body
     const validationResult = await signupPayloadModel.safeParseAsync(req.body)
     // console.log('signupValidationResult' ,validationResult.error)
@@ -30,7 +30,6 @@ export class AuthController {
     // create a salt and hash the password with it
     const salt = crypto.randomBytes(32).toString('hex')
     const hash = crypto.createHmac('sha256', salt).update(password).digest('hex')
-    // console.log("password", password, "salt", salt, 'hashedPassword', hash)
 
     // save the fields to the user
     const [result] = await db.insert(usersTable).values({
