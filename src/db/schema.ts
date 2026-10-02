@@ -11,6 +11,9 @@ export const usersTable = pgTable("users", {
   email: varchar('email', { length: 322 }).notNull().unique(),
   emailVerified: boolean('email_verified').default(false).notNull(),
 
+  emailVerificationToken: varchar('email_verification_token', {length: 255}),
+  emailVerificationTokenExpiry: timestamp('email_verification_token_expiry'),
+
   password: varchar('password', {length: 255}),
 
   refreshToken: text('refresh_token'),

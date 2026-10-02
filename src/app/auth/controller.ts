@@ -1,5 +1,6 @@
 import type {Request, Response} from 'express'
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 
 import { signinPayloadModel, signupPayloadModel } from './models.js';
 import { db } from '../../db/index.js';
@@ -9,10 +10,12 @@ import { generateAccessToken, generateRefreshToken, getTokenExpiry } from './uti
 import { ApiError } from '../../utils/api-error.js';
 import { ApiResponse } from '../../utils/api-response.js';
 import { cookieOptions } from './utils/constants.js';
+import { sendEmailVerificationMail } from '../../utils/mail.js';
 
 export class AuthController {
 
   public async handleSignup(req: Request, res: Response) {
+
     // validate values from req.body
     const validationResult = await signupPayloadModel.safeParseAsync(req.body)
 
@@ -24,14 +27,20 @@ export class AuthController {
     const {firstName, lastName, age, email, password} = validationResult.data
 
     // check if user with given email already exists
-    const existingUser = await db.select().from(usersTable).where(eq(usersTable.email, email))
+    // const existingUser = await db.select().from(usersTable).where(eq(usersTable.email, email))
 
     // throw error if exists
-    if(existingUser.length > 0) {
-      throw ApiError.conflict('User with this email already exists')
-    }
+    // if(existingUser.length > 0) {
+    //   throw ApiError.conflict('User with this email already exists')
+    // }
     // hash the password
     const hash = await bcrypt.hash(password, 10)
+
+    // generate email verification token and url
+    // const emailVerificationToken = crypto.randomBytes(32).toString('hex')
+    // const hashedEmailVerificationToken = await bcrypt.hash(emailVerificationToken, 12)
+
+    const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
 
     // save the fields to the user
     const [result] = await db.insert(usersTable).values({
@@ -40,6 +49,7 @@ export class AuthController {
       age,
       email,
       password: hash,
+      emailVerificationToken: hashedEmailVerificationToken,
     })
     .onConflictDoNothing({ target: usersTable.email })
     .returning({ id: usersTable.id })
@@ -48,6 +58,12 @@ export class AuthController {
     if(!result) {
       throw ApiError.conflict('User with this email already exists')
     }
+
+    // send email verification email to user with the token
+    const verificationUrl = `http://localhost:8080/auth/verify-email?token=${emailVerificationToken}`
+    const mailRes = await sendEmailVerificationMail(email, verificationUrl)
+    console.log('mailRes', mailRes)
+
     // return userid in response
     return ApiResponse.created(res, 'User created successfully', {id: result.id})
   }
@@ -84,12 +100,18 @@ export class AuthController {
     const accessToken = generateAccessToken({userId: userInDb.id})
     const refreshToken = generateRefreshToken({userId: userInDb.id})
 
-    // save the refreshToken in db
-    const [result] = await db.update(usersTable).set({refreshToken}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
+    const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
+    const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
 
+    
+    // save the refreshToken and emailVerificationToken in db
+    const [result] = await db.update(usersTable).set({refreshToken, emailVerificationToken: hashedEmailVerificationToken, emailVerificationTokenExpiry}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
+    
     if(!result) {
       throw ApiError.internal('Could not save refresh token')
     }
+    const mailRes = await sendEmailVerificationMail(userInDb.email, `http://localhost:8080/auth/verify-email?token=${emailVerificationToken}`)
+    console.log('mailRes', mailRes)
 
     // save the tokens in cookies/response data object
     res.cookie('access_token', accessToken, {...cookieOptions, expires: getTokenExpiry(accessToken)})
@@ -98,4 +120,10 @@ export class AuthController {
     // send the response
     return ApiResponse.ok(res, 'User signed in successfully')
   }
+}
+
+async function createTempToken() {
+  const token = crypto.randomBytes(32).toString('hex')
+  const hashedToken = await bcrypt.hash(token, 12)
+  return {token, hashedToken}
 }
