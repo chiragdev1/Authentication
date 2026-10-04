@@ -2,16 +2,19 @@ import jwt from 'jsonwebtoken'
 
 import type { NextFunction, Request, Response } from "express";
 import { ApiError } from '../../utils/api-error.js';
+import { db } from '../../db/index.js';
+import { usersTable } from '../../db/schema.js';
+import { eq } from 'drizzle-orm';
 
 declare global {
   namespace Express {
     interface Request {
-      userId?: string
+      user?: unknown
     }
   }
 }
 
-export function authenticateToken(
+export async function authenticateToken(
   req: Request,
   res: Response,
   next: NextFunction,
@@ -39,7 +42,9 @@ export function authenticateToken(
     throw ApiError.unauthorized("Invalid token payload")
   }
 
-  req.userId = payload.userId
+  const [userInDb] =  await db.select().from(usersTable).where(eq(usersTable.id, payload.userId))
+  req.user = userInDb
+  console.log("User authenticated successfully", req.user)
   next()
 }
 

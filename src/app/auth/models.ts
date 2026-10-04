@@ -12,3 +12,7 @@ export const signinPayloadModel = z.object({
   email: z.email(),
   password: z.string().min(6)
 })
+
+export const verifyEmailPayloadModel = z.object({
+  token: z.string().min(1).max(100)
+})

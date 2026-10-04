@@ -2,7 +2,7 @@ import type {Request, Response} from 'express'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 
-import { signinPayloadModel, signupPayloadModel } from './models.js';
+import { signinPayloadModel, signupPayloadModel, verifyEmailPayloadModel } from './models.js';
 import { db } from '../../db/index.js';
 import { usersTable } from '../../db/schema.js';
 import { eq } from 'drizzle-orm';
@@ -60,7 +60,7 @@ export class AuthController {
     }
 
     // send email verification email to user with the token
-    const verificationUrl = `http://localhost:8080/auth/verify-email?token=${emailVerificationToken}`
+    const verificationUrl = `http://localhost:8080/auth/verify-email/${emailVerificationToken}`
     const mailRes = await sendEmailVerificationMail(email, verificationUrl)
     console.log('mailRes', mailRes)
 
@@ -110,7 +110,7 @@ export class AuthController {
     if(!result) {
       throw ApiError.internal('Could not save refresh token')
     }
-    const mailRes = await sendEmailVerificationMail(userInDb.email, `http://localhost:8080/auth/verify-email?token=${emailVerificationToken}`)
+    const mailRes = await sendEmailVerificationMail(userInDb.email, `http://localhost:8080/auth/verify-email/${emailVerificationToken}`)
     console.log('mailRes', mailRes)
 
     // save the tokens in cookies/response data object
@@ -118,12 +118,51 @@ export class AuthController {
     res.cookie('refresh_token', refreshToken, {...cookieOptions, expires: getTokenExpiry(refreshToken)})
 
     // send the response
-    return ApiResponse.ok(res, 'User signed in successfully')
+    return ApiResponse.ok(res, 'User signed in successfully', {id: userInDb.id})
+  }
+
+  public async handleVerifyEmail(req: Request, res: Response) {
+
+    // validate the token from req.params
+    const validationResult = await verifyEmailPayloadModel.safeParseAsync(req.params)
+
+    if(!validationResult.success) {
+      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
+    }
+
+    const {token} =  validationResult.data
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
+
+    // search the db for the user with the token and check if it is valid and not expired
+    const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.emailVerificationToken, hashedToken))
+    console.log('userInDb', userInDb)
+
+    const isTokenValid = userInDb && userInDb.emailVerificationTokenExpiry && userInDb.emailVerificationTokenExpiry > new Date()
+
+    if(!userInDb || !isTokenValid) {
+      console.log('Invalid or expired email token', {userInDb, isTokenValid})
+      throw ApiError.notFound('Invalid or expired email token')
+    }
+
+    // update the emailVerified field to true and remove the emailVerificationToken and emailVerificationTokenExpiry fields from the user record
+    const updateRes = await db
+      .update(usersTable)
+      .set({emailVerified: true, emailVerificationToken: null, emailVerificationTokenExpiry: null})
+      .where(eq(usersTable.id, userInDb.id))
+
+    // if valid, update the user record to mark email as verified and remove the token from db
+    if(!updateRes) {
+      throw ApiError.internal('Could not update user record to mark email as verified')
+    }
+
+    return ApiResponse.ok(res, 'Email verified successfully')
   }
 }
 
 async function createTempToken() {
+  
   const token = crypto.randomBytes(32).toString('hex')
-  const hashedToken = await bcrypt.hash(token, 12)
+  const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
+
   return {token, hashedToken}
 }
