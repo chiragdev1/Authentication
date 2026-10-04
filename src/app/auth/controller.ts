@@ -41,6 +41,7 @@ export class AuthController {
     // const hashedEmailVerificationToken = await bcrypt.hash(emailVerificationToken, 12)
 
     const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
+    const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
 
     // save the fields to the user
     const [result] = await db.insert(usersTable).values({
@@ -50,6 +51,7 @@ export class AuthController {
       email,
       password: hash,
       emailVerificationToken: hashedEmailVerificationToken,
+      emailVerificationTokenExpiry
     })
     .onConflictDoNothing({ target: usersTable.email })
     .returning({ id: usersTable.id })
@@ -62,7 +64,6 @@ export class AuthController {
     // send email verification email to user with the token
     const verificationUrl = `http://localhost:8080/auth/verify-email/${emailVerificationToken}`
     const mailRes = await sendEmailVerificationMail(email, verificationUrl)
-    console.log('mailRes', mailRes)
 
     // return userid in response
     return ApiResponse.created(res, 'User created successfully', {id: result.id})

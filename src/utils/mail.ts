@@ -43,7 +43,7 @@ function escapeHtml(value: string): string {
 function generateEmailVerificationHtml(
   verificationUrl: string,
   appName: string = process.env.APP_NAME || "DSADEN",
-  expiresInMinutes: number = 30,
+  expiresInMinutes: number = 15,
 ): string {
   const url = escapeHtml(verificationUrl)
   const name = escapeHtml(appName)
