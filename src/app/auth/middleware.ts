@@ -5,6 +5,7 @@ import { ApiError } from '../../utils/api-error.js';
 import { db } from '../../db/index.js';
 import { usersTable } from '../../db/schema.js';
 import { eq } from 'drizzle-orm';
+import { reqUserModel } from './models.js';
 
 declare global {
   namespace Express {
@@ -42,8 +43,17 @@ export async function authenticateToken(
     throw ApiError.unauthorized("Invalid token payload")
   }
 
-  const [userInDb] =  await db.select().from(usersTable).where(eq(usersTable.id, payload.userId))
-  req.user = userInDb
+  // select only safe fields from the user table and attach it to req.user
+  const [userInDb] = await db.select({
+    id: usersTable.id,
+    firstName: usersTable.firstName,
+    lastName: usersTable.lastName,
+    age: usersTable.age,
+    email: usersTable.email,
+    emailVerified: usersTable.emailVerified,
+  }).from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1)
+  const safeUser = reqUserModel.parse(userInDb)
+  req.user = safeUser
   console.log("User authenticated successfully", req.user)
   next()
 }
@@ -51,3 +61,5 @@ export async function authenticateToken(
 // export function authorize(...roles) {
   
 // }
+
+// add middleware to validate cookies before authenticateToken middleware
