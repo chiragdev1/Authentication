@@ -1,19 +1,21 @@
 import jwt, {type SignOptions} from 'jsonwebtoken'
 import dotenv from 'dotenv'
+import crypto from 'crypto'
 import { ApiError } from '../../../utils/api-error.js';
 
 dotenv.config()
 
 
+// jwtid makes every token unique, even two issued for the same user in the same second
 export function generateAccessToken(payload: object) {
   const secret = process.env.ACCESS_TOKEN_SECRET_KEY as string
-  const token = jwt.sign(payload, secret, { expiresIn: process.env.ACCESS_TOKEN_EXPIRY as NonNullable<SignOptions['expiresIn']> })
+  const token = jwt.sign(payload, secret, { expiresIn: process.env.ACCESS_TOKEN_EXPIRY as NonNullable<SignOptions['expiresIn']>, jwtid: crypto.randomUUID() })
   return token
 }
 
 export function generateRefreshToken(payload: object) {
   const secret = process.env.REFRESH_TOKEN_SECRET_KEY as string
-  const token = jwt.sign(payload, secret, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY as NonNullable<SignOptions['expiresIn']> })
+  const token = jwt.sign(payload, secret, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY as NonNullable<SignOptions['expiresIn']>, jwtid: crypto.randomUUID() })
   return token
 }
 
@@ -24,12 +26,22 @@ export function getTokenExpiry(token: string) {
 }
 
 export function verifyRefreshToken(token: string) {
-  const secret = process.env.REFRESH_TOKEN_SECRET_KEY as string
+  const secret = process.env.REFRESH_TOKEN_SECRET_KEY
+
+  if(!secret) {
+    throw new Error("REFRESH_TOKEN_SECRET_KEY is not set")
+  }
+
+  let payload: string | jwt.JwtPayload
   try {
-    const payload = jwt.verify(token, secret) as jwt.JwtPayload
-    console.log("Refresh token verified successfully", payload)
-    return payload
-  } catch (err) {
+    payload = jwt.verify(token, secret)
+  } catch {
     throw ApiError.unauthorized("Invalid or expired refresh token")
   }
+
+  if(typeof payload === 'string' || !payload.userId) {
+    throw ApiError.unauthorized("Invalid refresh token payload")
+  }
+
+  return payload
 }

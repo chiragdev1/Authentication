@@ -9,7 +9,7 @@ const authController = new AuthController()
 
 authRouter.post('/sign-up', authController.handleSignup.bind(authController))
 authRouter.post('/sign-in', authController.handleSignin.bind(authController))
-authRouter.post('/logout', authenticateToken, authController.handleLogout.bind(authController))
+authRouter.post('/logout', authController.handleLogout.bind(authController))
 // no auth: the frontend posts the token from the email link, and the token itself identifies the user
 authRouter.post('/verify-email/:token', authController.handleVerifyEmail.bind(authController))
 authRouter.post('/refresh', authController.handleRefresh.bind(authController))

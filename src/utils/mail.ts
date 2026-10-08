@@ -242,7 +242,7 @@ function generateEmailVerificationText(
 function generateWelcomeHtml(
   firstName: string,
   appName: string = process.env.APP_NAME || "DSADEN",
-  appUrl: string = process.env.APP_URL || "http://localhost:8080",
+  appUrl: string = process.env.FRONTEND_URL || "http://localhost:3000",
 ): string {
   const userName = escapeHtml(firstName)
   const name = escapeHtml(appName)
@@ -421,7 +421,7 @@ function generateWelcomeHtml(
 function generateWelcomeText(
   firstName: string,
   appName: string = process.env.APP_NAME || "DSADEN",
-  appUrl: string = process.env.APP_URL || "http://localhost:8080",
+  appUrl: string = process.env.FRONTEND_URL || "http://localhost:3000",
 ): string {
   const year = new Date().getFullYear()
 

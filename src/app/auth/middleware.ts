@@ -52,9 +52,14 @@ export async function authenticateToken(
     email: usersTable.email,
     emailVerified: usersTable.emailVerified,
   }).from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1)
+
+  // the token is valid but the user no longer exists (e.g. account deleted)
+  if(!userInDb) {
+    throw ApiError.unauthorized("User not found")
+  }
+
   const safeUser = reqUserModel.parse(userInDb)
   req.user = safeUser
-  console.log("User authenticated successfully", req.user)
   next()
 }
 

@@ -9,7 +9,7 @@ import { eq } from 'drizzle-orm';
 import { generateAccessToken, generateRefreshToken, getTokenExpiry, verifyRefreshToken } from './utils/jwt-token.js';
 import { ApiError } from '../../utils/api-error.js';
 import { ApiResponse } from '../../utils/api-response.js';
-import { cookieOptions } from './utils/constants.js';
+import { cookieOptions, getFrontendUrl } from './utils/constants.js';
 import { sendEmailVerificationMail, sendResetPasswordMail, sendWelcomeMail } from '../../utils/mail.js';
 
 export class AuthController {
@@ -61,9 +61,11 @@ export class AuthController {
       throw ApiError.conflict('User with this email already exists')
     }
 
-    // send email verification email to user with the token
-    const verificationUrl = `http://localhost:8080/auth/verify-email/${emailVerificationToken}`
-    const mailRes = await sendEmailVerificationMail(email, verificationUrl)
+    // send email verification email to user with the token; the user can get a new one by signing in if this fails
+    const verificationUrl = `${getFrontendUrl()}/verify-email?token=${emailVerificationToken}`
+    sendEmailVerificationMail(email, verificationUrl).catch((error) => {
+      console.error(`Failed to send verification mail to ${email}:`, error)
+    })
 
     // return userid in response
     return ApiResponse.created(res, 'User created successfully', {id: result.id})
@@ -104,29 +106,31 @@ export class AuthController {
     // hash the refreshToken before saving it in db
     const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex')
 
-    // send email verification mail if email is not verified
-    if (!userInDb.emailVerified) {
-      const {
-        token: emailVerificationToken,
-        hashedToken: hashedEmailVerificationToken,
-      } = await createTempToken();
+    // resend the verification mail only if the email is not verified and the last link has expired,
+    // so signing in repeatedly doesn't send a new mail every time
+    const hasValidVerificationToken = userInDb.emailVerificationTokenExpiry && userInDb.emailVerificationTokenExpiry > new Date()
+    const shouldSendVerificationMail = !userInDb.emailVerified && !hasValidVerificationToken
 
-      const emailVerificationTokenExpiry = new Date(
-        Date.now() + 15 * 60 * 1000,
-      ); // 15 minutes from now
+    const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
+    const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
 
-      // save the refreshToken and emailVerificationToken in db
-      const [result] = await db.update(usersTable).set({refreshToken, emailVerificationToken: hashedEmailVerificationToken, emailVerificationTokenExpiry}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
-      
-      if(!result) {
-        throw ApiError.internal('Could not save refresh token and email verification token in db')
-      }
-      const mailRes = await sendEmailVerificationMail(userInDb.email, `http://localhost:8080/auth/verify-email/${emailVerificationToken}`)
-      console.log('mailRes', mailRes)
+    // save the hashed refreshToken (and the new emailVerificationToken if needed) in db
+    const [result] = await db.update(usersTable).set({
+      refreshToken: hashedRefreshToken,
+      ...(shouldSendVerificationMail && {emailVerificationToken: hashedEmailVerificationToken, emailVerificationTokenExpiry})
+    }).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
+
+    if(!result) {
+      throw ApiError.internal('Could not save refresh token in db')
     }
 
-    // save the refreshToken in db
-    const [result] = await db.update(usersTable).set({refreshToken: hashedRefreshToken}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
+    // a mail failure shouldn't fail sign in
+    if(shouldSendVerificationMail) {
+      const verificationUrl = `${getFrontendUrl()}/verify-email?token=${emailVerificationToken}`
+      sendEmailVerificationMail(userInDb.email, verificationUrl).catch((error) => {
+        console.error(`Failed to send verification mail to ${userInDb.email}:`, error)
+      })
+    }
 
     // save the tokens in cookies/response data object
     res.cookie('access_token', accessToken, {...cookieOptions, expires: getTokenExpiry(accessToken)})
@@ -150,22 +154,21 @@ export class AuthController {
 
     // search the db for the user with the token and check if it is valid and not expired
     const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.emailVerificationToken, hashedToken))
-    console.log('userInDb', userInDb)
 
     const isTokenValid = userInDb && userInDb.emailVerificationTokenExpiry && userInDb.emailVerificationTokenExpiry > new Date()
 
     if(!userInDb || !isTokenValid) {
-      console.log('Invalid or expired email token', {userInDb, isTokenValid})
       throw ApiError.notFound('Invalid or expired email token')
     }
 
     // update the emailVerified field to true and remove the emailVerificationToken and emailVerificationTokenExpiry fields from the user record
-    const updateRes = await db
+    const [updateRes] = await db
       .update(usersTable)
       .set({emailVerified: true, emailVerificationToken: null, emailVerificationTokenExpiry: null})
       .where(eq(usersTable.id, userInDb.id))
+      .returning({id: usersTable.id})
 
-    // if valid, update the user record to mark email as verified and remove the token from db
+    // if no row returned, the update failed
     if(!updateRes) {
       throw ApiError.internal('Could not update user record to mark email as verified')
     }
@@ -179,20 +182,21 @@ export class AuthController {
   }
 
   public async handleLogout(req: Request, res: Response) {
-    // the user is already authenticated via authenticate middleware
+    // no auth middleware here, so logout still works after the access token has expired
+    const refreshToken = req.cookies?.refresh_token
 
-    // get the id from req.user
-    const userId = (req.user as any)?.id
+    // revoke the refreshToken in db; matching on the hash means only the owner of this token can revoke it
+    if(refreshToken) {
+      const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex')
+      await db.update(usersTable).set({refreshToken: null}).where(eq(usersTable.refreshToken, hashedRefreshToken))
+    }
 
-    // clear the refreshToken in db
-    const [result] = await db.update(usersTable).set({refreshToken: null}).where(eq(usersTable.id, userId)).returning({id: usersTable.id})
-
-    // clear both accessToken and refreshToken the cookies
+    // always clear both accessToken and refreshToken cookies
     res.clearCookie('access_token', cookieOptions)
     res.clearCookie('refresh_token', cookieOptions)
 
     // send response
-    return ApiResponse.ok(res, 'User logged out successfully', {id: result?.id})
+    return ApiResponse.ok(res, 'User logged out successfully')
   }
 
   public async handleMe(req: Request, res: Response) {
@@ -223,13 +227,6 @@ export class AuthController {
 
     // for double checking check if the userId from the token matches the userId from the db
     if(!userInDb || userInDb.id !== userId) {
-      throw ApiError.unauthorized("Invalid or expired refresh token")
-    }
-
-    // compare the hashed refreshToken from the cookie with the hashed refreshToken in db
-    const isRefreshTokenValid = userInDb.refreshToken === hashedRefreshToken
-
-    if(!isRefreshTokenValid) {
       throw ApiError.unauthorized("Invalid or expired refresh token")
     }
 
@@ -269,9 +266,11 @@ export class AuthController {
     // search the db for email
     const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.email, email))
 
-    // if user not found, send 404 error
+    // same response whether or not the user exists, so this endpoint can't be used to check which emails are registered
+    const genericMessage = 'If an account with this email exists, a reset password email has been sent'
+
     if(!userInDb) {
-      throw ApiError.notFound('User with this email not found')
+      return ApiResponse.ok(res, genericMessage)
     }
 
     // generate a resetPasswordToken and save it in db with expiry
@@ -286,19 +285,16 @@ export class AuthController {
       throw ApiError.internal('Could not save reset password token in db')
     }
 
-    // create the reset password url
-    const resetUrl = `http://localhost:8080/auth/reset-password/${resetPasswordToken}`
+    // create the reset password url pointing at the frontend page
+    const resetUrl = `${getFrontendUrl()}/reset-password?token=${resetPasswordToken}`
 
-    // send the reset password email to the user with the token
-    const mailRes = await sendResetPasswordMail(userInDb.email, userInDb.firstName, resetUrl)
-
-    // send error if the mail could not be sent
-    if(!mailRes) {
-      throw ApiError.internal('Could not send reset password email')
-    }
+    // send the reset password email without awaiting it, so a mail failure or the extra delay doesn't reveal that the user exists
+    sendResetPasswordMail(userInDb.email, userInDb.firstName, resetUrl).catch((error) => {
+      console.error(`Failed to send reset password mail to ${userInDb.email}:`, error)
+    })
 
     // send response
-    return ApiResponse.ok(res, 'Reset password email sent successfully', {id: result?.id})
+    return ApiResponse.ok(res, genericMessage)
   }
 
   public async handleResetPassword(req: Request, res: Response) {
@@ -331,8 +327,8 @@ export class AuthController {
     // hash the new password
     const hashedNewPassword = await bcrypt.hash(newPassword, 10)
 
-    // if valid, update the password in db and remove the resetPasswordToken and resetPasswordTokenExpiry fields from the user record
-    const [result] = await db.update(usersTable).set({password: hashedNewPassword, resetPasswordToken: null, resetPasswordTokenExpiry: null}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
+    // if valid, update the password, remove the reset token fields, and clear the refreshToken so existing sessions are signed out
+    const [result] = await db.update(usersTable).set({password: hashedNewPassword, resetPasswordToken: null, resetPasswordTokenExpiry: null, refreshToken: null}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
 
     // if no row returned, send 500 error
     if(!result) {
