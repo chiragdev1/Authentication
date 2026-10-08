@@ -39,5 +39,7 @@
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
     "skipLibCheck": true,
-  }
+  },
+  // only the app is built into dist; tests are type-checked by test/tsconfig.json
+  "include": ["src"]
 }

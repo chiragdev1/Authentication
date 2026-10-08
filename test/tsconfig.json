@@ -1,0 +1,12 @@
+{
+  // Type-checks the tests (`pnpm typecheck:test`) without emitting anything.
+  // Vitest itself only strips types, so type errors in tests would otherwise go unnoticed.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["../src", ".", "../vitest.config.ts"]
+}
