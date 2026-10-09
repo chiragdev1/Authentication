@@ -5,12 +5,12 @@ import crypto from 'crypto'
 import { changePasswordPayloadModel, forgotPasswordPayloadModel, resetPasswordPayloadModel, signinPayloadModel, signupPayloadModel, verifyEmailPayloadModel } from './models.js';
 import { db } from '../../db/index.js';
 import { usersTable } from '../../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { generateAccessToken, generateRefreshToken, getTokenExpiry, verifyRefreshToken } from './utils/jwt-token.js';
 import { ApiError } from '../../utils/api-error.js';
 import { ApiResponse } from '../../utils/api-response.js';
 import { cookieOptions, getFrontendUrl } from './utils/constants.js';
-import { sendEmailVerificationMail, sendResetPasswordMail, sendWelcomeMail } from '../../utils/mail.js';
+import { sendAccountExistsMail, sendEmailVerificationMail, sendResetPasswordMail, sendWelcomeMail } from '../../utils/mail.js';
 import { deleteImage, uploadImage } from '../../utils/imagekit.js';
 
 export class AuthController {
@@ -27,24 +27,18 @@ export class AuthController {
 
     const {firstName, lastName, age, email, password} = validationResult.data
 
-    // check if user with given email already exists
-    // const existingUser = await db.select().from(usersTable).where(eq(usersTable.email, email))
+    // same response whether or not the email is already registered, so this endpoint can't be used to check which emails have accounts;
+    // the difference is only explained in the mail, which only the owner of the email can read
+    const genericMessage = 'Check your email to finish creating your account'
 
-    // throw error if exists
-    // if(existingUser.length > 0) {
-    //   throw ApiError.conflict('User with this email already exists')
-    // }
-    // hash the password
+    // hash the password before checking the email, so both cases take about the same time
     const hash = await bcrypt.hash(password, 10)
-
-    // generate email verification token and url
-    // const emailVerificationToken = crypto.randomBytes(32).toString('hex')
-    // const hashedEmailVerificationToken = await bcrypt.hash(emailVerificationToken, 12)
 
     const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
     const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
+    const verificationUrl = `${getFrontendUrl()}/verify-email?token=${emailVerificationToken}`
 
-    // save the fields to the user
+    // save the fields to the user; the unique email constraint decides if the account is new, so two signups at once can't both create it
     const [result] = await db.insert(usersTable).values({
       firstName,
       lastName,
@@ -57,19 +51,63 @@ export class AuthController {
     .onConflictDoNothing({ target: usersTable.email })
     .returning({ id: usersTable.id })
 
-    // no row returned means another request created this email in the meantime
-    if(!result) {
-      throw ApiError.conflict('User with this email already exists')
+    // new account: send the verification mail; the user can get a new one by signing up or signing in again if this fails
+    if(result) {
+      sendEmailVerificationMail(email, verificationUrl).catch((error) => {
+        console.error(`Failed to send verification mail to ${email}:`, error)
+      })
+      return ApiResponse.created(res, genericMessage)
     }
 
-    // send email verification email to user with the token; the user can get a new one by signing in if this fails
-    const verificationUrl = `${getFrontendUrl()}/verify-email?token=${emailVerificationToken}`
-    sendEmailVerificationMail(email, verificationUrl).catch((error) => {
-      console.error(`Failed to send verification mail to ${email}:`, error)
-    })
+    // no row returned means the email is already registered
+    const now = new Date()
 
-    // return userid in response
-    return ApiResponse.created(res, 'User created successfully', {id: result.id})
+    // not verified yet: whoever controls the inbox hasn't claimed it, so the latest signup replaces the details and gets a new link.
+    // only once the last link has expired, so a signup can't swap the password under a link that is still in the owner's inbox.
+    // clearing the refreshToken signs out anyone who signed in with the old password before verifying
+    const [unverifiedUser] = await db.update(usersTable).set({
+      firstName,
+      lastName: lastName ?? null,
+      age: age ?? null,
+      password: hash,
+      emailVerificationToken: hashedEmailVerificationToken,
+      emailVerificationTokenExpiry,
+      refreshToken: null
+    })
+    .where(and(
+      eq(usersTable.email, email),
+      eq(usersTable.emailVerified, false),
+      or(isNull(usersTable.emailVerificationTokenExpiry), lt(usersTable.emailVerificationTokenExpiry, now))
+    ))
+    .returning({id: usersTable.id})
+
+    if(unverifiedUser) {
+      sendEmailVerificationMail(email, verificationUrl).catch((error) => {
+        console.error(`Failed to send verification mail to ${email}:`, error)
+      })
+      return ApiResponse.created(res, genericMessage)
+    }
+
+    // verified: tell the owner someone tried to sign up with their email, at most once every 15 minutes so the inbox can't be flooded.
+    // the check and the update are one query, so parallel signups can't both send the mail
+    const accountExistsMailCooldown = new Date(now.getTime() - (15*60*1000))
+
+    const [verifiedUser] = await db.update(usersTable).set({accountExistsMailSentAt: now})
+    .where(and(
+      eq(usersTable.email, email),
+      eq(usersTable.emailVerified, true),
+      or(isNull(usersTable.accountExistsMailSentAt), lt(usersTable.accountExistsMailSentAt, accountExistsMailCooldown))
+    ))
+    .returning({firstName: usersTable.firstName})
+
+    if(verifiedUser) {
+      sendAccountExistsMail(email, verifiedUser.firstName, `${getFrontendUrl()}/sign-in`, `${getFrontendUrl()}/forgot-password`).catch((error) => {
+        console.error(`Failed to send account exists mail to ${email}:`, error)
+      })
+    }
+
+    // any other case (unverified with a link still valid, or a mail sent recently) sends nothing, but the response is the same
+    return ApiResponse.created(res, genericMessage)
   }
 
   public async handleSignin(req: Request, res: Response) {
@@ -100,37 +138,43 @@ export class AuthController {
       throw ApiError.unauthorized('Invalid email or password')
     }
 
-    // generate and assign tokens 
+    // no session until the email is verified, so nobody can get into an account before the inbox owner has claimed it
+    if(!userInDb.emailVerified) {
+      const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
+      const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
+
+      // send a new link only if the last one has expired, so signing in repeatedly doesn't send a new mail every time;
+      // the check and the update are one query, so parallel sign ins can't both send it
+      const [linkRenewed] = await db.update(usersTable).set({emailVerificationToken: hashedEmailVerificationToken, emailVerificationTokenExpiry})
+      .where(and(
+        eq(usersTable.id, userInDb.id),
+        or(isNull(usersTable.emailVerificationTokenExpiry), lt(usersTable.emailVerificationTokenExpiry, new Date()))
+      ))
+      .returning({id: usersTable.id})
+
+      // a mail failure shouldn't change the response
+      if(linkRenewed) {
+        const verificationUrl = `${getFrontendUrl()}/verify-email?token=${emailVerificationToken}`
+        sendEmailVerificationMail(userInDb.email, verificationUrl).catch((error) => {
+          console.error(`Failed to send verification mail to ${userInDb.email}:`, error)
+        })
+      }
+
+      throw ApiError.forbidden('Please verify your email before signing in, check your inbox for the verification link')
+    }
+
+    // generate and assign tokens
     const accessToken = generateAccessToken({userId: userInDb.id})
     const refreshToken = generateRefreshToken({userId: userInDb.id})
 
     // hash the refreshToken before saving it in db
     const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex')
 
-    // resend the verification mail only if the email is not verified and the last link has expired,
-    // so signing in repeatedly doesn't send a new mail every time
-    const hasValidVerificationToken = userInDb.emailVerificationTokenExpiry && userInDb.emailVerificationTokenExpiry > new Date()
-    const shouldSendVerificationMail = !userInDb.emailVerified && !hasValidVerificationToken
-
-    const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
-    const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
-
-    // save the hashed refreshToken (and the new emailVerificationToken if needed) in db
-    const [result] = await db.update(usersTable).set({
-      refreshToken: hashedRefreshToken,
-      ...(shouldSendVerificationMail && {emailVerificationToken: hashedEmailVerificationToken, emailVerificationTokenExpiry})
-    }).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
+    // save the hashed refreshToken in db
+    const [result] = await db.update(usersTable).set({refreshToken: hashedRefreshToken}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
 
     if(!result) {
       throw ApiError.internal('Could not save refresh token in db')
-    }
-
-    // a mail failure shouldn't fail sign in
-    if(shouldSendVerificationMail) {
-      const verificationUrl = `${getFrontendUrl()}/verify-email?token=${emailVerificationToken}`
-      sendEmailVerificationMail(userInDb.email, verificationUrl).catch((error) => {
-        console.error(`Failed to send verification mail to ${userInDb.email}:`, error)
-      })
     }
 
     // save the tokens in cookies/response data object
@@ -143,14 +187,14 @@ export class AuthController {
 
   public async handleVerifyEmail(req: Request, res: Response) {
 
-    // validate the token from req.params
-    const validationResult = await verifyEmailPayloadModel.safeParseAsync(req.params)
+    // validate the token from req.params and the password from req.body
+    const validationResult = await verifyEmailPayloadModel.safeParseAsync({token: req.params.token, ...req.body})
 
     if(!validationResult.success) {
       throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
     }
 
-    const {token} =  validationResult.data
+    const {token, password} =  validationResult.data
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
 
     // search the db for the user with the token and check if it is valid and not expired
@@ -162,16 +206,28 @@ export class AuthController {
       throw ApiError.notFound('Invalid or expired email token')
     }
 
-    // update the emailVerified field to true and remove the emailVerificationToken and emailVerificationTokenExpiry fields from the user record
+    // the link only proves the inbox; the password proves this is the same person who signed up,
+    // so someone who signed up with another person's email can't get the account verified with their own password
+    const isPasswordValid = userInDb.password ? await bcrypt.compare(password, userInDb.password) : false
+
+    if(!isPasswordValid) {
+      // cancel the link, so the inbox owner can sign up again straight away and replace the details instead of waiting for it to expire
+      await db.update(usersTable).set({emailVerificationToken: null, emailVerificationTokenExpiry: null}).where(and(eq(usersTable.id, userInDb.id), eq(usersTable.emailVerificationToken, hashedToken)))
+      throw ApiError.unauthorized('Incorrect password, this verification link has been cancelled. Sign up again or sign in to get a new link')
+    }
+
+    // mark the email verified and remove the token; matching on the token means a signup that replaced the details in the meantime
+    // (and so the password just checked) makes this update do nothing.
+    // clearing the refreshToken signs out any session started before the email was verified
     const [updateRes] = await db
       .update(usersTable)
-      .set({emailVerified: true, emailVerificationToken: null, emailVerificationTokenExpiry: null})
-      .where(eq(usersTable.id, userInDb.id))
+      .set({emailVerified: true, emailVerificationToken: null, emailVerificationTokenExpiry: null, refreshToken: null})
+      .where(and(eq(usersTable.id, userInDb.id), eq(usersTable.emailVerificationToken, hashedToken)))
       .returning({id: usersTable.id})
 
-    // if no row returned, the update failed
+    // no row returned means the token was used or replaced since it was read
     if(!updateRes) {
-      throw ApiError.internal('Could not update user record to mark email as verified')
+      throw ApiError.notFound('Invalid or expired email token')
     }
 
     // send welcome mail now that signup is complete; a mail failure shouldn't fail verification
@@ -229,6 +285,11 @@ export class AuthController {
     // for double checking check if the userId from the token matches the userId from the db
     if(!userInDb || userInDb.id !== userId) {
       throw ApiError.unauthorized("Invalid or expired refresh token")
+    }
+
+    // sessions from before sign in required a verified email can't be renewed
+    if(!userInDb.emailVerified) {
+      throw ApiError.forbidden("Please verify your email before signing in")
     }
 
     // if refreshTOken match then generate new accessToken and refreshToken

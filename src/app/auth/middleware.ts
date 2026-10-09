@@ -59,6 +59,11 @@ export async function authenticateToken(
     throw ApiError.unauthorized("User not found")
   }
 
+  // access tokens issued before sign in required a verified email are still valid until they expire
+  if(!userInDb.emailVerified) {
+    throw ApiError.forbidden("Please verify your email before signing in")
+  }
+
   const safeUser = reqUserModel.parse(userInDb)
   req.user = safeUser
   next()

@@ -23,8 +23,10 @@ export const signinPayloadModel = z.object({
   password: z.string().min(6)
 })
 
+// the password is checked on verify, so only the person who chose it at signup and also owns the inbox can verify the account
 export const verifyEmailPayloadModel = z.object({
-  token: z.string().min(1).max(100)
+  token: z.string().min(1).max(100),
+  password: z.string().min(1).max(72)
 })
 
 export const reqUserModel = z.object({

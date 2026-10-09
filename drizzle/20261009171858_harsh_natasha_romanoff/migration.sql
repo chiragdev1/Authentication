@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "account_exists_mail_sent_at" timestamp;

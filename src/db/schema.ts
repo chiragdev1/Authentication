@@ -21,6 +21,8 @@ export const usersTable = pgTable("users", {
 
   refreshToken: text('refresh_token'),
 
+  accountExistsMailSentAt: timestamp('account_exists_mail_sent_at'),
+
   avatarUrl: text('avatar_url'),
   avatarFileId: varchar('avatar_file_id', {length: 255}),
 
