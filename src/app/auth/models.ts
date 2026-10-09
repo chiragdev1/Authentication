@@ -33,7 +33,8 @@ export const reqUserModel = z.object({
   lastName: z.string().nullable().optional(),
   age: z.number().int().positive().optional().nullable(),
   email: z.email(),
-  emailVerified: z.boolean()
+  emailVerified: z.boolean(),
+  avatarUrl: z.string().nullable()
 })
 
 export const forgotPasswordPayloadModel = z.object({

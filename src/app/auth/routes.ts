@@ -2,6 +2,7 @@ import express from 'express'
 import type {Router} from 'express'
 import { AuthController } from './controller.js';
 import { authenticateToken } from './middleware.js';
+import { uploadAvatar } from '../middlewares/upload-multer.js';
 
 export const authRouter: Router = express.Router()
 
@@ -17,3 +18,4 @@ authRouter.get('/me', authenticateToken, authController.handleMe.bind(authContro
 authRouter.post('/forgot-password', authController.handleForgotPassword.bind(authController))
 authRouter.post('/reset-password/:token', authController.handleResetPassword.bind(authController))
 authRouter.post('/change-password' , authenticateToken, authController.handleChangePassword.bind(authController))
+authRouter.post('/upload-avatar', authenticateToken, uploadAvatar, authController.handleUploadAvatar.bind(authController))

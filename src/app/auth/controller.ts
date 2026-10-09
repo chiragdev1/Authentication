@@ -11,6 +11,7 @@ import { ApiError } from '../../utils/api-error.js';
 import { ApiResponse } from '../../utils/api-response.js';
 import { cookieOptions, getFrontendUrl } from './utils/constants.js';
 import { sendEmailVerificationMail, sendResetPasswordMail, sendWelcomeMail } from '../../utils/mail.js';
+import { deleteImage, uploadImage } from '../../utils/imagekit.js';
 
 export class AuthController {
 
@@ -387,6 +388,55 @@ export class AuthController {
 
     // send response
     return ApiResponse.ok(res, 'Password changed successfully', {id: result.id})
+  }
+
+  public async handleUploadAvatar(req: Request, res: Response) {
+    // get the id from req.user
+    const userId = (req.user as any)?.id
+
+    // the file is already parsed and its type checked by the uploadAvatar middleware
+    const file = req.file
+    const extension: string | undefined = res.locals.imageExtension
+
+    if(!file || !extension) {
+      throw ApiError.badRequest('Avatar file is required')
+    }
+
+    // upload to ImageKit first; the old avatar stays in place until the db points at the new one
+    // the file name is random so the public url doesn't expose the user's id; the tag still links the file to its user in the ImageKit dashboard
+    const uploadedAvatar = await uploadImage(file.buffer, `${crypto.randomUUID()}.${extension}`, file.mimetype, '/avatars', [`user:${userId}`])
+
+    // lock the row so two uploads at the same time can't both read the same old avatar and leave one file orphaned
+    let previousAvatarFileId: string | null
+    try {
+      previousAvatarFileId = await db.transaction(async (tx) => {
+        const [userInDb] = await tx.select({avatarFileId: usersTable.avatarFileId}).from(usersTable).where(eq(usersTable.id, userId)).for('update')
+
+        if(!userInDb) {
+          throw ApiError.unauthorized('User not found')
+        }
+
+        await tx.update(usersTable).set({avatarUrl: uploadedAvatar.url, avatarFileId: uploadedAvatar.fileId}).where(eq(usersTable.id, userId))
+
+        return userInDb.avatarFileId
+      })
+    } catch (error) {
+      // the db was not updated, so remove the file we just uploaded instead of leaving it unused in ImageKit
+      deleteImage(uploadedAvatar.fileId).catch((deleteError) => {
+        console.error(`Failed to delete unused avatar ${uploadedAvatar.fileId} from ImageKit:`, deleteError)
+      })
+      throw error
+    }
+
+    // the new avatar is saved, so a failure to delete the old one shouldn't fail the upload
+    if(previousAvatarFileId) {
+      deleteImage(previousAvatarFileId).catch((error) => {
+        console.error(`Failed to delete old avatar ${previousAvatarFileId} from ImageKit:`, error)
+      })
+    }
+
+    // send response
+    return ApiResponse.ok(res, 'Avatar uploaded successfully', {avatarUrl: uploadedAvatar.url})
   }
 
 }

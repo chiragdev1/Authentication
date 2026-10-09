@@ -51,6 +51,7 @@ export async function authenticateToken(
     age: usersTable.age,
     email: usersTable.email,
     emailVerified: usersTable.emailVerified,
+    avatarUrl: usersTable.avatarUrl,
   }).from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1)
 
   // the token is valid but the user no longer exists (e.g. account deleted)

@@ -21,6 +21,9 @@ export const usersTable = pgTable("users", {
 
   refreshToken: text('refresh_token'),
 
+  avatarUrl: text('avatar_url'),
+  avatarFileId: varchar('avatar_file_id', {length: 255}),
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').$onUpdate( ()=> new Date())
   
