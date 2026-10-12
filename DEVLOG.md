@@ -70,12 +70,29 @@ A review rated the service 7/10 and listed twelve problems. All of them are fixe
 - **First test suite** (Vitest + Supertest against a separate test database).
 - The `refresh_token` column is dropped, so **everyone is signed out once** on deploy.
 
+## 12 Oct 2026 · Split into microservices (`microservice-architecture` branch)
+A trial of the monolith as a pnpm workspace, run as a **separate application** next to `main`: ports 9000–9002, its own compose project (`authentication-microservices`) with Postgres on 5433 and Redis on 6380, cookie names prefixed `ms_` (browsers share cookies across ports on `localhost`), env file `.env.microservices`. The public API is unchanged apart from the port.
+- **gateway** (9000): helmet, CORS, the JSON-only check and routing, moved out of the app. It streams bodies through `http-proxy-middleware`, adds `x-internal-key` and `X-Forwarded-For`, rejects `..` path segments, never routes `/internal`, and answers `502` in JSON when a service is down.
+- **auth-service** (9001): users, sessions and every `/auth/*` route except avatars. They stay together because a reset revokes every session in one transaction. Two new internal routes: `/internal/authenticate` (the same session check as `authenticateToken`, through `findSessionUser`) and `/internal/users/:id/avatar` (the `FOR UPDATE` swap that used to sit inside the upload handler).
+- **notification-service**: templates and Resend behind a BullMQ `email` queue. auth-service's `mail.ts` keeps its function names but only enqueues, so the controller is untouched. The job contract is a Zod union in `packages/shared/src/email-jobs.ts`. The worker fails a job that breaks the contract without retrying it. "Password changed" mails now carry the time of the change, not the send time.
+- **media-service** (9002): multer, sharp and ImageKit. It authenticates through auth-service before reading the file, deletes the new upload only when auth-service clearly refuses the swap, and keeps it after a timeout or 5xx.
+- **packages/shared**: `ApiError`, `ApiResponse`, `parseOrThrow`, the error handler, `loadEnv`, `requireInternalKey`, a rate-limiter factory with per-service Redis prefixes, and the email contract.
+- Tests: 40 across five packages (gateway against echo servers, media and notification with their neighbours mocked). An end-to-end run of all four processes covered sign-up → queue → verify → sign-in → real ImageKit upload → refresh → logout. Resend refused the key for `mail.dsaden.com`, so the worker logged and failed those jobs as designed.
+
+## 12 Oct 2026 · Email redesign (microservices branch)
+- The five emails were five copies of the same ~180 lines. They now share one layout and a few components (`templates/components.ts`): brand header, a card with an accent bar, an icon badge, a bulletproof button (VML for Outlook), callouts, numbered steps, a details table, and a link fallback.
+- Each email has its own accent and icon: indigo for verify, green for welcome, amber for reset, blue for "account exists", red for "password changed". The security mail now shows the account and the time of the change in a table, with a "Secure my account" button.
+- Dark mode for clients that support `prefers-color-scheme`, preview text padded so the body doesn't leak into the inbox preview, a "sent to" footer, and a plain-text part generated next to each html part.
+- `pnpm --filter @authentication/notification-service preview` renders samples to `preview/`. Tests check that names are escaped, that every link is in both parts, and that the change time is shown.
+- Sender switched to `no-reply@dsaden.com`, the domain verified in Resend (`mail.dsaden.com` was refused).
+
 ---
 
 ## Lessons
 Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.md](LEARNINGS.md).
 
 ## Next up
+- Microservices branch: decide how long email jobs stay in Redis and how often they retry (`EMAIL_JOB_OPTIONS`); fix the Resend key/domain pair; consider per-service internal keys; Dockerfiles if the trial continues.
 - Frontend: password field on the verify page, handle the 403 on sign-in, a single in-flight refresh with a retry on the "refreshed by another request" 401, and a sessions page.
 - Start Redis (`pnpm db:up`) and set `REDIS_URL` and `TRUST_PROXY` in each environment.
 - Consider an absolute session lifetime (sessions currently last as long as they keep refreshing).

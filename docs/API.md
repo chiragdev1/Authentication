@@ -2,10 +2,12 @@
 
 Everything a client needs in order to use the Authentication API.
 
-- **Base URL (local):** `http://localhost:8080`
+- **Base URL (local):** `http://localhost:9000` (the gateway; on this branch it is the only public port)
 - **All endpoints** are under `/auth`.
 - **Request bodies** are JSON (`Content-Type: application/json`), except avatar upload, which is `multipart/form-data`. Any other content type returns `415`.
 - **Cross-origin calls** are allowed only from `FRONTEND_URL`, with credentials.
+- **Postman:** a ready collection is in [`docs/postman/`](postman/authentication-microservices.postman_collection.json).
+- **Cookie names** are `access_token` and `refresh_token`, with `COOKIE_PREFIX` in front when it is set (this branch's sample uses `ms_`). Clients never read them, so the prefix changes nothing for a frontend.
 
 ---
 
@@ -62,7 +64,7 @@ What this means for a browser client:
 
 - Send cookies with every request: `fetch(url, { credentials: 'include' })`, or `axios` with `withCredentials: true`.
 - When a protected endpoint returns **`401`**, call [`POST /auth/refresh`](#post-authrefresh) once, then retry the original request. If refresh also fails, send the user to sign in.
-- **In production, the frontend and API must be on the same site**, e.g. `app.example.com` and `api.example.com`. The cookies are `SameSite=Lax`, so browsers won't send them from a different site. Locally, `localhost:3000` → `localhost:8080` works, because ports don't count as different sites.
+- **In production, the frontend and API must be on the same site**, e.g. `app.example.com` and `api.example.com`. The cookies are `SameSite=Lax`, so browsers won't send them from a different site. Locally, `localhost:3000` → `localhost:9000` works, because ports don't count as different sites.
 - **Each sign-in is its own session** (one per device or browser). Signing in on a phone doesn't sign out the laptop. See [List sessions](#get-authsessions).
 - **"Signed out" takes effect immediately.** When a session is ended (logout, logout everywhere, revoking it, or a password reset or change), both its refresh token and its access token stop working on the next request.
 
@@ -92,8 +94,9 @@ Invalid input returns **`400`** with every problem listed in the message, as `fi
 | `415` | The body isn't JSON (or `multipart/form-data` for avatar upload). |
 | `429` | `Too many requests, please try again later`. See [Rate limits](#rate-limits); the `RateLimit` and `Retry-After` headers say when to try again. |
 | `500` | Server error. Usually `Internal Server Error`, sometimes a more specific message. Safe to retry. |
+| `502` | `Service unavailable, please try again later`. The gateway couldn't reach the service behind it. Safe to retry. |
 
-A body that isn't valid JSON returns `400` `Request body is not valid JSON`.
+A body that isn't valid JSON returns `400` `Request body is not valid JSON`. An unknown route returns `404` `Route not found`.
 
 ### Password rules
 
@@ -401,6 +404,7 @@ The previous avatar is deleted automatically.
 | `413` | `Avatar must be at most 2 MB` |
 | `401` / `403` | Same as [`GET /auth/me`](#get-authme) |
 | `502` | `Failed to upload image`. The image service is unavailable; try again. |
+| `502` | `Authentication service is unavailable`. The session couldn't be checked or the avatar couldn't be saved; try again. |
 
 ---
 
@@ -481,6 +485,17 @@ Sets a new password. `:token` comes from the `?token=` in the reset link.
 | `401` / `403` | Same as [`GET /auth/me`](#get-authme) |
 | `409` | `The password was changed by another request, please try again` |
 | `429` | Too many attempts for this user. |
+
+---
+
+## Internal endpoints (not public)
+
+auth-service also serves these for other services. The gateway never routes them (`404`), and auth-service refuses any request without the `x-internal-key` header (`403` `Requests must come through the gateway`).
+
+| Endpoint | Caller | Body | Response `data` |
+|---|---|---|---|
+| `POST /internal/authenticate` | media-service | `{ "accessToken": "…" }` | `{ user, sessionId }`, or the same `401`/`403` as [`GET /auth/me`](#get-authme) |
+| `PUT /internal/users/:id/avatar` | media-service | `{ "url": "https://…", "fileId": "…" }` | `{ previousFileId }` (`null` if there was none); `404` if the user doesn't exist |
 
 ---
 

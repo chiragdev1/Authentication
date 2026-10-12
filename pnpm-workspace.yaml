@@ -1,0 +1,13 @@
+packages:
+  - packages/*
+  - services/*
+
+# native modules that need their install scripts to run
+onlyBuiltDependencies:
+  - bcrypt
+  - sharp
+  - esbuild
+
+# optional native speed-up for bullmq; it falls back to plain JS without it
+ignoredBuiltDependencies:
+  - msgpackr-extract

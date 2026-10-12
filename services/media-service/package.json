@@ -1,0 +1,26 @@
+{
+  "name": "@authentication/media-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/index.js",
+    "dev": "tsc-watch -p . --onSuccess \"node dist/index.js\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@authentication/shared": "workspace:*",
+    "@imagekit/nodejs": "^7.12.1",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1",
+    "multer": "^2.4.0",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0"
+  }
+}

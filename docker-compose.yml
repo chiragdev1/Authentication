@@ -1,18 +1,22 @@
+# a separate compose project from main (which gets the folder name, "authentication"), so its own containers, network
+# and volumes, on host ports that don't clash. `pnpm db:up` / `db:down` here never touch main's database or redis
+name: authentication-microservices
+
 services:
   postgresdb:
     image: postgres:17
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=authentication-with-typescript
+      - POSTGRES_DB=auth_microservices
     volumes:
-      - postgres_data_1:/var/lib/postgresql/data
-  # shared rate limit counts; the app falls back to in-memory limits when REDIS_URL is not set
+      - auth_microservices_pgdata:/var/lib/postgresql/data
+  # email queue and shared rate limit counts
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "6380:6379"
 volumes:
-  postgres_data_1:
+  auth_microservices_pgdata:

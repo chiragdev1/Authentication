@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    // services are run, not imported, so only packages/shared emits type declarations
+    "declaration": false,
+    "declarationMap": false
+  }
+}

@@ -72,6 +72,13 @@ For the timeline, see [DEVLOG.md](DEVLOG.md).
 
 ## Config & tooling
 
+- **Two apps, one working tree.** `.env` is gitignored, so it is shared by every branch checked out in this folder. Reading it from the microservices branch would have pointed the trial at main's database. → This branch reads `.env.microservices` and uses its own database, Redis db and ports (12 Oct).
+  **Rule:** a branch that runs as a separate app gets its own env file and data stores; untracked files don't change with branches.
+- **Hidden sharing between the two apps.** A separate database name wasn't enough. Compose names its project after the folder, so both branches' `db:up`/`db:down` drove the same containers and volume. And browsers don't separate cookies by port, so `localhost:9000` and `localhost:8080` overwrote each other's `access_token`. → `name: authentication-microservices` in compose, Postgres 5433 and Redis 6380, and a `COOKIE_PREFIX` (12 Oct).
+  **Rule:** to isolate an app, list everything it shares: servers, compose project and volumes, ports, env files and browser cookies.
+- **Declarations in a monorepo.** With `declaration: true`, services failed with TS2883 (an inferred type that can't be named) for exported Express handlers. → Only `packages/shared` emits `.d.ts`; services turn it off (12 Oct).
+  **Rule:** emit declarations only from packages that others import.
+
 - **`.env.sample` was ignored by git.** The `.env.*` pattern caught it. → Added `!.env.sample`.
   **Rule:** after adding an ignore pattern, check with `git check-ignore -v <file>`.
 - **A real value in the sample file.** The production sender address was in `.env.sample`. → Replaced with placeholders.
@@ -81,6 +88,17 @@ For the timeline, see [DEVLOG.md](DEVLOG.md).
 - **Missing config failed late.** Secrets were read with `process.env.X as string`, so a missing one only failed at the first sign-in, and a missing `FRONTEND_URL` in production would have emailed links to localhost. → One Zod schema in `config/env.ts` checks everything at startup (12 Oct).
   **Rule:** validate configuration once, at boot, and read it from one typed object.
 - **Renaming by accident.** Dropping one column and adding another in the same `db:generate` makes drizzle-kit ask whether it's a rename. → Generate the additions and the drop as two migrations.
+
+## Service boundaries
+
+- **Splitting tables that change together.** The obvious split puts users and sessions in separate services, but a password reset updates the user and revokes every session in one transaction. Across two services that becomes a distributed transaction. → users and sessions stay in auth-service; other services ask it over `/internal` (12 Oct).
+  **Rule:** draw service lines around data that changes in the same transaction, not around nouns.
+- **Bypassing the gateway.** Once CORS and the JSON-only check moved to the gateway, any service reachable directly would skip them, and `X-Forwarded-For` could be forged. → Services listen on loopback and require `x-internal-key`, which the gateway overwrites on every forwarded request (12 Oct).
+  **Rule:** when a check moves to the edge, make the services behind it refuse traffic that didn't pass the edge.
+- **Ambiguous failures between services.** The monolith deleted the new avatar whenever saving it failed. Across a network, a timeout doesn't mean "not saved": deleting then could leave the user pointing at a missing file. → Delete only after a definite 4xx; keep and log after a timeout or 5xx (12 Oct).
+  **Rule:** after a timeout, assume the remote side may have succeeded, and choose the cleanup whose worst case is cheaper.
+- **Data in the queue.** Email jobs carry addresses and live reset and verification links, and BullMQ keeps finished jobs in Redis unless told otherwise. → Job retention is an explicit setting next to the producer.
+  **Rule:** treat a message queue as storage; decide what it keeps and for how long.
 
 ## Process
 

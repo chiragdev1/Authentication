@@ -1,17 +1,54 @@
-# Authentication Service
+# Authentication Service (microservices)
 
-A production-minded authentication API built with **Express 5**, **TypeScript** and **PostgreSQL**.
+A production-minded authentication API built with **Express 5**, **TypeScript** and **PostgreSQL**, split into services behind an API gateway.
 It handles the full account lifecycle: sign-up with email verification, cookie-based sessions with refresh tokens, password reset and change, and profile avatars stored on ImageKit.
 
-> **Building a frontend against this API?** Go straight to the **[API reference](docs/API.md)**.
+> **This is the `microservice-architecture` branch**, a trial of the monolith on `main` split into services. It runs as a **separate application**: its own service ports (9000–9002), its own Docker Compose project (`authentication-microservices`) with Postgres on **5433** and Redis on **6380**, its own cookie names (`ms_` prefix) and its own env file (`.env.microservices`), so it can run next to the monolith (8080, Postgres 5432, Redis 6379) without touching it.
+
+> **Building a frontend against this API?** Go straight to the **[API reference](docs/API.md)**. The public API is the same as the monolith's; only the port changed.
 
 ---
+
+## Architecture
+
+```
+                         ┌──────────────────────────────┐
+ browser ──► :9000  ───► │ gateway                      │  helmet · CORS · JSON-only · routing
+                         └──────┬───────────────┬───────┘  adds x-internal-key + X-Forwarded-For
+                     /auth/*    │               │  /auth/upload-avatar
+                                ▼               ▼
+              ┌──────────────────────┐   ┌──────────────────────┐
+              │ auth-service  :9001  │◄──┤ media-service  :9002 │──► ImageKit
+              │ users + sessions     │   │ multer · sharp       │
+              │ JWT · rate limits    │   │ POST /internal/authenticate
+              └───┬──────────────┬───┘   │ PUT  /internal/users/:id/avatar
+                  │              │       └──────────────────────┘
+          Postgres│              │ BullMQ "email" queue (Redis :6380)
+   auth_microservices :5433      ▼
+                         ┌──────────────────────────┐
+                         │ notification-service     │──► Resend
+                         │ queue worker, no port    │
+                         └──────────────────────────┘
+```
+
+| Service | Owns | Why it is its own service |
+|---|---|---|
+| **gateway** | The only public port. Security headers, CORS, the JSON-only check, and routing by path. Streams bodies through without parsing them. | Browser-facing checks happen once, at the edge. |
+| **auth-service** | The `users` and `sessions` tables, tokens, cookies, every `/auth/*` endpoint except avatar upload, and their rate limits. | Users and sessions change together in transactions (a reset revokes every session), so they stay in one database. |
+| **notification-service** | Email templates and Resend. Consumes jobs from the `email` queue. | Emails were already fire-and-forget; a queue adds retries, and a Resend outage can no longer slow auth-service down. |
+| **media-service** | Avatar upload: multer, sharp re-encoding, ImageKit. | The heaviest work (image decoding) scales and fails on its own. |
+
+**How the services trust each other.** Services listen on `127.0.0.1` and refuse any request without the shared `INTERNAL_API_KEY` header. The gateway adds that header to everything it forwards, overwriting any value a client sends. The gateway never routes `/internal/*`, and it rejects `..` path segments, so a client can't reach those routes through it.
+
+**Email flow.** auth-service puts a job on the BullMQ queue (`packages/shared/src/email-jobs.ts` is the contract both sides compile against), and notification-service sends it. The job holds the address and the link, including a live verification or reset token, so how long jobs are kept in Redis matters.
+
+**Avatar flow.** media-service asks auth-service to check the session (`/internal/authenticate`) *before* reading the file. It then re-encodes and uploads, and asks auth-service to swap the pointer (`/internal/users/:id/avatar`, which uses `SELECT … FOR UPDATE`). If auth-service rejects the swap, the new file is deleted. After a timeout or a 5xx, the swap may still have happened, so the file is kept and a warning is logged.
 
 ## Features
 
 - **Sign-up and sign-in** with Zod validation, bcrypt password hashing (cost 12) and a check against known-breached passwords.
-- **Email verification** with single-use links that expire after 15 minutes, sent through [Resend](https://resend.com).
-- **Sessions per device**, with short-lived access tokens and refresh tokens that are replaced on every use, both in `httpOnly` cookies. Users can list their sessions, end one, or sign out everywhere, and ending a session takes effect immediately.
+- **Email verification** with single-use links that expire after 15 minutes, sent through [Resend](https://resend.com) from a queue with its own worker.
+- **Sessions per device**, with short-lived access tokens and refresh tokens that are replaced on every use, both in `httpOnly` cookies. Users can list their sessions, end one, or sign out everywhere, and ending a session takes effect immediately, in every service.
 - **Password management:** forgot password, reset password and change password, with a "your password was changed" email.
 - **Avatar uploads** to [ImageKit](https://imagekit.io). The real file type is checked from the file's contents, images are re-encoded to strip metadata, and old images are cleaned up automatically.
 - **Rate limiting** per IP, per email and per user, shared through Redis.
@@ -26,11 +63,13 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
 
 | Area | Tools |
 |---|---|
-| Runtime | Node.js, TypeScript, Express 5 |
+| Runtime | Node.js, TypeScript, Express 5, pnpm workspaces |
+| Gateway | `http-proxy-middleware`, `helmet`, `cors` |
 | Database | PostgreSQL 17 (Docker), Drizzle ORM |
+| Messaging | BullMQ on Redis |
 | Validation | Zod |
 | Auth | JSON Web Tokens (`jsonwebtoken`), `bcrypt` |
-| Security | `helmet`, `cors`, `express-rate-limit` with Redis |
+| Rate limits | `express-rate-limit` with Redis |
 | Email | Resend |
 | File uploads | Multer (in-memory), `sharp`, ImageKit |
 | Tests | Vitest, Supertest |
@@ -41,9 +80,9 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
 
 ### Prerequisites
 
-- **Node.js 20+** (developed on Node 24)
+- **Node.js 22+** (developed on Node 24)
 - **pnpm**: run `corepack enable` to use the version pinned in `package.json`
-- **Docker**, for the local PostgreSQL database and Redis
+- **Docker**, for PostgreSQL and Redis
 - A **Resend** API key (for emails) and an **ImageKit** private key (for avatars)
 
 ### 1. Install dependencies
@@ -55,108 +94,122 @@ pnpm install
 ### 2. Configure environment variables
 
 ```bash
-cp .env.sample .env
+cp .env.microservices.sample .env.microservices
 ```
 
-Then open `.env` and fill in the values. Every variable is checked at startup; if one is missing or invalid, the server prints which and exits.
+Then fill in the values. Every service reads this one file at the repo root and validates only the variables it uses; if one is missing or invalid, that service prints which and exits. `.env` belongs to the monolith on `main` and is not read here.
 
-| Variable | Required | Description |
-|---|---|---|
-| `PORT` | No | Port the API listens on. Default: `8080`. |
-| `NODE_ENV` | No | `development` or `production`. In production, cookies are sent over HTTPS only. |
-| `DATABASE_URL` | Yes | PostgreSQL connection string. The sample value matches `docker-compose.yml`. |
-| `ACCESS_TOKEN_SECRET_KEY` | Yes | Secret used to sign access tokens. At least 32 characters. |
-| `REFRESH_TOKEN_SECRET_KEY` | Yes | Secret used to sign refresh tokens. At least 32 characters, and **must be different** from the access token secret. |
-| `ACCESS_TOKEN_EXPIRY` | No | Access token lifetime. Default: `15m`. |
-| `REFRESH_TOKEN_EXPIRY` | No | Refresh token lifetime, which is also how long an unused session lasts. Default: `7d`. |
-| `APP_NAME` | No | Name shown in emails. Default: `DSADEN`. |
-| `RESEND_API_KEY` | Yes | Resend API key (starts with `re_`). **The server won't start without it.** |
-| `EMAIL_FROM` | Yes | Sender address on a domain verified in Resend, e.g. `"YourApp <no-reply@mail.yourdomain.com>"`. |
-| `FRONTEND_URL` | In production | Base URL of your frontend. Links in emails point here, and it is the only origin allowed by CORS. Default in development: `http://localhost:3000`. |
-| `IMAGEKIT_PRIVATE_KEY` | For avatars | ImageKit private API key. The server starts without it; only avatar uploads fail. |
-| `REDIS_URL` | In production | Redis for rate-limit counts, e.g. `redis://localhost:6379`. Without it each server process counts on its own, which is fine for local development. |
-| `TRUST_PROXY` | Behind a proxy | How many reverse proxies sit in front of the API. Default: `0`. **Set it correctly**, or per-IP rate limits either lump every user together or can be dodged with a fake `X-Forwarded-For` header. |
+| Variable | Used by | Required | Description |
+|---|---|---|---|
+| `NODE_ENV` | all | No | `development` or `production`. In production, cookies are sent over HTTPS only. |
+| `INTERNAL_API_KEY` | gateway, auth, media | Yes | Shared secret between the gateway and services. At least 32 characters. |
+| `GATEWAY_PORT` | gateway | No | Public port. Default: `9000`. |
+| `AUTH_SERVICE_PORT` / `MEDIA_SERVICE_PORT` | auth / media | No | Defaults: `9001` / `9002`. |
+| `AUTH_SERVICE_URL` / `MEDIA_SERVICE_URL` | gateway, media | No | Where to reach the services. Defaults: `http://127.0.0.1:9001` / `:9002`. |
+| `SERVICE_HOST` | auth, media | No | Interface the internal services listen on. Default: `127.0.0.1`. |
+| `DATABASE_URL` | auth | Yes | PostgreSQL connection string. The sample points at this branch's container on port `5433`. |
+| `REDIS_URL` | auth, notification (required); media (optional) | Yes | Email queue and rate-limit counts. The sample points at this branch's container on port `6380`. |
+| `ACCESS_TOKEN_SECRET_KEY` / `REFRESH_TOKEN_SECRET_KEY` | auth | Yes | JWT secrets, at least 32 characters and **different from each other**. |
+| `ACCESS_TOKEN_EXPIRY` / `REFRESH_TOKEN_EXPIRY` | auth | No | Defaults: `15m` / `7d`. The refresh expiry is how long an unused session lasts. |
+| `APP_NAME` | notification | No | Name shown in emails. Default: `DSADEN`. |
+| `RESEND_API_KEY` / `EMAIL_FROM` | notification | Yes | Resend key and a sender on a domain the key is allowed to send from. |
+| `EMAIL_CONCURRENCY` | notification | No | Emails sent at once. Default: `5`. |
+| `COOKIE_PREFIX` | gateway, auth, media | No | Prepended to the cookie names. Browsers share cookies across ports, so the sample sets `ms_` to keep this app's cookies from overwriting the monolith's on `localhost`. Default: none (`access_token`, `refresh_token`). |
+| `FRONTEND_URL` | gateway, auth, notification | In production | Email links point here, and it is the only origin allowed by CORS. Default: `http://localhost:3000`. |
+| `IMAGEKIT_PRIVATE_KEY` | media | For avatars | Without it, only avatar uploads fail (`502`). |
+| `IMAGEKIT_FOLDER` | media | No | Upload folder. Default: `/avatars`; the sample uses `/avatars-microservices`. |
+| `TRUST_PROXY` | auth, media | Behind a proxy | Proxies in front of the **gateway**. Default: `0`. Services add one for the gateway itself. |
 
-Generate strong JWT secrets with:
+Generate secrets with:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
 
-### 3. Start the database and run migrations
+### 3. Create the database and run migrations
 
 ```bash
-pnpm db:up        # starts PostgreSQL and Redis in Docker
+pnpm db:up        # starts this branch's PostgreSQL (5433) and Redis (6380); main's containers are a different compose project
+pnpm db:create    # creates auth_microservices if it doesn't exist (the container already creates it on first start)
 pnpm db:migrate   # creates the tables
 ```
 
-### 4. Run the server
+### 4. Run the services
 
 ```bash
 pnpm dev
 ```
 
-The API is now running at `http://localhost:8080`. A quick check:
+This builds `packages/shared`, then runs every service in watch mode. The gateway is at `http://localhost:9000`:
 
 ```bash
-curl http://localhost:8080/
-# {"message":"Express Application is running"}
+curl http://localhost:9000/
+# {"message":"Gateway is running"}
 ```
+
+### Try it in Postman
+
+Import [`docs/postman/authentication-microservices.postman_collection.json`](docs/postman/authentication-microservices.postman_collection.json). It calls the gateway, keeps the session cookies in Postman's cookie jar, and checks the expected status on every request. Set the `email` and `password` collection variables first.
+
+Verification and reset tokens arrive by email. To test locally without a mailbox, print the newest link queued for an address:
+
+```bash
+pnpm --filter @authentication/auth-service dev:last-link postman@example.com
+```
+
+It reads the job from Redis, so it only finds jobs the queue still keeps (see `EMAIL_JOB_OPTIONS` in `services/auth-service/src/utils/mail.ts`).
 
 ---
 
 ## Scripts
 
+Run from the repo root.
+
 | Command | What it does |
 |---|---|
-| `pnpm dev` | Compiles in watch mode and restarts the server on every change. |
-| `pnpm build` | Compiles TypeScript to `dist/`. Also the project's type check. |
-| `pnpm start` | Runs the compiled server from `dist/`. |
-| `pnpm test` | Runs the test suite against a separate `<database>_test` database, created and migrated automatically. Emails, the breached-password check and ImageKit are mocked. |
-| `pnpm db:up` / `pnpm db:down` | Starts / stops the PostgreSQL and Redis containers. |
-| `pnpm db:generate` | Creates a new migration after you change `src/db/schema.ts`. |
-| `pnpm db:migrate` | Applies pending migrations to the database. |
-| `pnpm drizzle:studio` | Opens Drizzle Studio to browse the database. |
+| `pnpm dev` | Builds `shared`, then runs every package in watch mode. After changing `shared`, restart the services that use it. |
+| `pnpm build` | Compiles every package in dependency order. Also the type check. |
+| `pnpm start` | Runs every compiled service. |
+| `pnpm test` | Builds `shared`, then runs each package's tests. auth-service uses a separate `auth_microservices_test` database, created and migrated automatically. |
+| `pnpm db:up` / `pnpm db:down` | Starts / stops this branch's PostgreSQL and Redis containers (compose project `authentication-microservices`). |
+| `pnpm db:create` | Creates the database named in `DATABASE_URL`. |
+| `pnpm db:generate` / `pnpm db:migrate` | Creates / applies migrations for auth-service. |
+| `pnpm drizzle:studio` | Opens Drizzle Studio on auth-service's database. |
 
-**Changing the database schema:** edit `src/db/schema.ts` → `pnpm db:generate` → review the SQL in `drizzle/` → `pnpm db:migrate` → commit the schema and the migration together.
+Run one package with a filter, e.g. `pnpm --filter @authentication/auth-service test`.
+
+**Changing the database schema:** edit `services/auth-service/src/db/schema.ts` → `pnpm db:generate` → review the SQL in `services/auth-service/drizzle/` → `pnpm db:migrate` → commit the schema and the migration together.
 
 ---
 
 ## Project structure
 
 ```
-src/
-├── index.ts                    # Entry point: starts the HTTP server
-├── config/
-│   └── env.ts                  # Validates environment variables at startup
-├── app/
-│   ├── index.ts                # Express app: middleware, routes, error handler
-│   ├── auth/
-│   │   ├── routes.ts           # Endpoint → middleware → controller wiring
-│   │   ├── controller.ts       # Request handlers (AuthController)
-│   │   ├── models.ts           # Zod schemas for request bodies
-│   │   ├── middleware.ts       # authenticateToken: checks the access token and its session
-│   │   └── utils/              # JWT helpers, sessions, cookie options, constants
-│   └── middlewares/
-│       ├── error-handler.ts    # Turns errors into JSON responses
-│       ├── rate-limit.ts       # Per-IP, per-email and per-user limits
-│       ├── require-json.ts     # Rejects non-JSON bodies (CSRF protection)
-│       └── upload-multer.ts    # Avatar upload parsing, validation and re-encoding
-├── db/
-│   ├── index.ts                # Drizzle database client
-│   └── schema.ts               # Table definitions
-└── utils/
-    ├── api-error.ts            # ApiError: errors with an HTTP status
-    ├── api-response.ts         # ApiResponse: consistent success responses
-    ├── mail.ts                 # Email sending and templates
-    ├── imagekit.ts             # ImageKit upload and delete
-    ├── password.ts             # bcrypt hashing and verification
-    ├── breached-password.ts    # Have I Been Pwned check
-    └── parse-or-throw.ts       # Zod validation → 400
-tests/                          # Vitest + Supertest integration tests
-drizzle/                        # Generated SQL migrations
+packages/shared/src/            # @authentication/shared, imported as '@authentication/shared/<module>'
+├── api-error.ts, api-response.ts, parse-or-throw.ts, error-handler.ts
+├── load-env.ts                 # reads .env.microservices, validates a service's env model
+├── internal-auth.ts            # x-internal-key header + requireInternalKey middleware
+├── rate-limit.ts               # createRateLimiterFactory (Redis store), ipKey, userKey
+├── email-jobs.ts               # the email queue's name and job contract (Zod)
+└── request.ts                  # req.user / req.sessionId types
+services/
+├── gateway/src/                # app.ts (routing), proxy.ts, require-json.ts
+├── auth-service/
+│   ├── src/app/auth/           # routes, controller, models, middleware, utils (JWT, sessions)
+│   ├── src/app/internal/       # /internal/authenticate, /internal/users/:id/avatar
+│   ├── src/app/middlewares/    # rate limits
+│   ├── src/utils/mail.ts       # puts email jobs on the queue
+│   ├── src/db/                 # schema + client
+│   ├── drizzle/                # SQL migrations
+│   └── scripts/create-database.js
+├── notification-service/src/   # worker.ts (queue consumer), mail.ts (templates + Resend)
+└── media-service/src/          # routes, controller, auth-client.ts, middlewares (authenticate, upload-multer), imagekit.ts
 docs/API.md                     # API reference
 ```
+
+Each package has its own `tests/`.
+
+**Email design:** every email is built from the components in `services/notification-service/src/templates/`. Each kind has its own accent colour and icon, there is a dark-mode version for clients that support it, and each email has a plain-text part. To see them in a browser, run `pnpm --filter @authentication/notification-service preview` and open the files in `services/notification-service/preview/`.
 
 ---
 
@@ -175,20 +228,22 @@ docs/API.md                     # API reference
 
 Every authenticated request checks that its session is still active, so **ending a session takes effect immediately**, including for access tokens already issued.
 
-Cookies are `httpOnly` and `SameSite=Lax`, and `Secure` in production. Frontend code never reads or stores tokens itself. **Deploy the frontend and API on the same site** (e.g. `app.example.com` and `api.example.com`); browsers don't send `Lax` cookies across different sites.
+Cookies are `httpOnly` and `SameSite=Lax`, and `Secure` in production. Frontend code never reads or stores tokens itself. **Deploy the frontend and the gateway on the same site** (e.g. `app.example.com` and `api.example.com`); browsers don't send `Lax` cookies across different sites.
 
 ## Security notes
 
 - Passwords are hashed with bcrypt at cost 12; older, cheaper hashes are upgraded at sign-in. New passwords are checked against Have I Been Pwned.
 - Refresh, verification and reset tokens are stored as SHA-256 hashes, so a database leak does not expose working tokens.
 - Sign-up, sign-in and forgot-password give the same response, in about the same time, whether or not an account exists.
-- Only JSON bodies are accepted (plus multipart for avatars), and CORS allows only `FRONTEND_URL`, so other websites can't make a signed-in browser call the API. `helmet` sets the standard security headers.
+- Only JSON bodies are accepted (plus multipart for avatars), and CORS allows only `FRONTEND_URL`, so other websites can't make a signed-in browser call the API. `helmet` sets the standard security headers. All of this happens in the gateway, so the services refuse requests that didn't come through it.
 - Uploaded avatars are checked by their file contents, then re-encoded, which drops metadata such as GPS location. Files are stored under random names, so URLs don't expose user IDs.
 
 ### Known limitations
 
 - **The per-email sign-in limit can be used to lock someone out** for 15 minutes by failing 5 times with their email. This is the usual trade-off of per-account limits.
 - **Avatar upload accepts `multipart/form-data`**, which a form on a sibling subdomain could send. Changing an avatar is low impact, but a custom header requirement would close it.
+- **One shared internal key.** Every service can call every other service's internal routes. Per-service keys, or mTLS, would limit what a compromised service could do.
+- **An avatar can be left unused in ImageKit** when auth-service doesn't answer the pointer swap. It's logged, and it is the safer failure: deleting the file could leave a user pointing at a missing image.
 
 ---
 

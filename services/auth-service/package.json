@@ -1,0 +1,38 @@
+{
+  "name": "@authentication/auth-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/index.js",
+    "dev": "tsc-watch -p . --onSuccess \"node dist/index.js\"",
+    "test": "vitest run",
+    "db:create": "node scripts/create-database.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "drizzle:studio": "drizzle-kit studio",
+    "dev:last-link": "node scripts/last-email-link.js"
+  },
+  "dependencies": {
+    "@authentication/shared": "workspace:*",
+    "bcrypt": "^6.0.0",
+    "bullmq": "^5.81.5",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^18.0.4",
+    "drizzle-orm": "1.0.0-rc.4",
+    "express": "^5.2.1",
+    "ioredis": "^5.11.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "1.0.0-rc.4"
+  }
+}
