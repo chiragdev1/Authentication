@@ -1,16 +1,16 @@
-import jwt from 'jsonwebtoken'
-
 import type { NextFunction, Request, Response } from "express";
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import { ApiError } from '../../utils/api-error.js';
 import { db } from '../../db/index.js';
-import { usersTable } from '../../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { sessionsTable, usersTable } from '../../db/schema.js';
 import { reqUserModel } from './models.js';
+import { verifyAccessToken } from './utils/jwt-token.js';
 
 declare global {
   namespace Express {
     interface Request {
       user?: unknown
+      sessionId?: string
     }
   }
 }
@@ -20,30 +20,16 @@ export async function authenticateToken(
   res: Response,
   next: NextFunction,
 ) {
-  // extract the token from req.cookies
   const token: string | undefined = req.cookies?.access_token;
-  const secret = process.env.ACCESS_TOKEN_SECRET_KEY;
 
-  if(!secret) {
-    throw new Error("ACCESS_TOKEN_SECRET_KEY is not set")
-  }
   if(!token) {
     throw ApiError.unauthorized("Token not provided")
   }
 
-  // decode the token and extract the id
-  let payload: string | jwt.JwtPayload
-  try {
-    payload = jwt.verify(token, secret)
-  } catch {
-    throw ApiError.unauthorized("Invalid or expired token")
-  }
+  const {userId, sid} = verifyAccessToken(token)
 
-  if(typeof payload === 'string' || !payload.userId) {
-    throw ApiError.unauthorized("Invalid token payload")
-  }
-
-  // select only safe fields from the user table and attach it to req.user
+  // the user is read through its live session, so a revoked session (logout, password change, reuse detected) stops
+  // its access token straight away instead of when it expires. this is the query that ran anyway, plus one join
   const [userInDb] = await db.select({
     id: usersTable.id,
     firstName: usersTable.firstName,
@@ -52,25 +38,28 @@ export async function authenticateToken(
     email: usersTable.email,
     emailVerified: usersTable.emailVerified,
     avatarUrl: usersTable.avatarUrl,
-  }).from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1)
+  })
+  .from(usersTable)
+  .innerJoin(sessionsTable, eq(sessionsTable.userId, usersTable.id))
+  .where(and(
+    eq(usersTable.id, userId),
+    eq(sessionsTable.id, sid),
+    isNull(sessionsTable.revokedAt),
+    gt(sessionsTable.expiresAt, new Date())
+  ))
+  .limit(1)
 
-  // the token is valid but the user no longer exists (e.g. account deleted)
+  // the user was deleted, or the session was revoked or has expired
   if(!userInDb) {
-    throw ApiError.unauthorized("User not found")
+    throw ApiError.unauthorized("Session has ended, please sign in again")
   }
 
-  // access tokens issued before sign in required a verified email are still valid until they expire
+  // sessions are only created for verified users, so this only guards against data changed by hand
   if(!userInDb.emailVerified) {
     throw ApiError.forbidden("Please verify your email before signing in")
   }
 
-  const safeUser = reqUserModel.parse(userInDb)
-  req.user = safeUser
+  req.user = reqUserModel.parse(userInDb)
+  req.sessionId = sid
   next()
 }
-
-// export function authorize(...roles) {
-  
-// }
-
-// add middleware to validate cookies before authenticateToken middleware

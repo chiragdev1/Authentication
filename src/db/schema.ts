@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 
 export const usersTable = pgTable("users", {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -18,8 +18,7 @@ export const usersTable = pgTable("users", {
 
   resetPasswordToken: varchar('reset_password_token', {length: 255}),
   resetPasswordTokenExpiry: timestamp('reset_password_token_expiry'),
-
-  refreshToken: text('refresh_token'),
+  resetPasswordMailSentAt: timestamp('reset_password_mail_sent_at'),
 
   accountExistsMailSentAt: timestamp('account_exists_mail_sent_at'),
 
@@ -28,5 +27,24 @@ export const usersTable = pgTable("users", {
 
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').$onUpdate( ()=> new Date())
-  
+
 });
+
+// one row per signed in device; the refresh token rotates in place, and prevTokenHash remembers the one it replaced to spot reuse
+export const sessionsTable = pgTable("sessions", {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => usersTable.id, {onDelete: 'cascade'}),
+
+  tokenHash: varchar('token_hash', {length: 64}).notNull().unique(),
+  prevTokenHash: varchar('prev_token_hash', {length: 64}),
+
+  userAgent: varchar('user_agent', {length: 255}),
+  ip: varchar('ip', {length: 45}),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  lastUsedAt: timestamp('last_used_at').defaultNow().notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  revokedAt: timestamp('revoked_at'),
+}, (table) => [
+  index('sessions_user_id_idx').on(table.userId),
+])

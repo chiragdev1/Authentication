@@ -9,5 +9,10 @@ services:
       - POSTGRES_DB=authentication-with-typescript
     volumes:
       - postgres_data_1:/var/lib/postgresql/data
+  # shared rate limit counts; the app falls back to in-memory limits when REDIS_URL is not set
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
 volumes:
   postgres_data_1:

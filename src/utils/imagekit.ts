@@ -1,13 +1,13 @@
-import "dotenv/config"
 import ImageKit, {NotFoundError, toFile} from "@imagekit/nodejs"
 import {ApiError} from "./api-error.js"
+import {env} from "../config/env.js"
 
 let imagekitClient: ImageKit | null = null
 
 // created on first use, so the server can still start (and serve other routes) without ImageKit configured
 function getImageKitClient() {
   if (!imagekitClient) {
-    const privateKey = process.env.IMAGEKIT_PRIVATE_KEY
+    const privateKey = env.IMAGEKIT_PRIVATE_KEY
 
     if (!privateKey) {
       throw new Error("IMAGEKIT_PRIVATE_KEY is not set")

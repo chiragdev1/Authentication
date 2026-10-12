@@ -1,9 +1,9 @@
-import "dotenv/config"
 import {Resend} from "resend"
 import {ApiError} from "./api-error.js"
+import {env} from "../config/env.js"
 
-const resendClient = new Resend(process.env.RESEND_API_KEY)
-const from = process.env.EMAIL_FROM || "team@dsaden.com"
+const resendClient = new Resend(env.RESEND_API_KEY)
+const from = env.EMAIL_FROM
 
 async function sendEmail(to: string, subject: string, html: string, text: string) {
   const {data, error} = await resendClient.emails.send({
@@ -15,7 +15,8 @@ async function sendEmail(to: string, subject: string, html: string, text: string
   })
 
   if (error) {
-    console.error(`Failed to send email to ${to}:`, error)
+    // the subject identifies the mail; the address stays out of the logs
+    console.error(`Failed to send email "${subject}":`, error)
     throw ApiError.internal("Failed to send email")
   }
 
@@ -38,7 +39,7 @@ export async function sendWelcomeMail(to: string, firstName: string) {
 
   return await sendEmail(
     to,
-    `Welcome to ${process.env.APP_NAME || "DSADEN"}!`,
+    `Welcome to ${env.APP_NAME}!`,
     htmlContent,
     textContent,
   );
@@ -70,6 +71,21 @@ export async function sendAccountExistsMail(
   return await sendEmail(to, "You already have an account", htmlContent, textContent);
 }
 
+// sent after a password reset or change; it is the owner's only signal if someone else did it
+export async function sendPasswordChangedMail(
+  to: string,
+  firstName: string,
+  forgotPasswordUrl: string,
+) {
+  const changedAt = new Date().toUTCString()
+
+  const htmlContent = generatePasswordChangedHtml(firstName, changedAt, forgotPasswordUrl);
+
+  const textContent = generatePasswordChangedText(firstName, changedAt, forgotPasswordUrl);
+
+  return await sendEmail(to, "Your password was changed", htmlContent, textContent);
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -81,7 +97,7 @@ function escapeHtml(value: string): string {
 
 function generateEmailVerificationHtml(
   verificationUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = env.APP_NAME,
   expiresInMinutes: number = 15,
 ): string {
   const url = escapeHtml(verificationUrl)
@@ -229,7 +245,7 @@ function generateEmailVerificationHtml(
 }
 function generateEmailVerificationText(
   verificationUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = env.APP_NAME,
   expiresInMinutes: number = 15,
 ): string {
   const year = new Date().getFullYear()
@@ -255,8 +271,8 @@ function generateEmailVerificationText(
 
 function generateWelcomeHtml(
   firstName: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
-  appUrl: string = process.env.FRONTEND_URL || "http://localhost:3000",
+  appName: string = env.APP_NAME,
+  appUrl: string = env.FRONTEND_URL,
 ): string {
   const userName = escapeHtml(firstName)
   const name = escapeHtml(appName)
@@ -434,8 +450,8 @@ function generateWelcomeHtml(
 
 function generateWelcomeText(
   firstName: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
-  appUrl: string = process.env.FRONTEND_URL || "http://localhost:3000",
+  appName: string = env.APP_NAME,
+  appUrl: string = env.FRONTEND_URL,
 ): string {
   const year = new Date().getFullYear()
 
@@ -469,7 +485,7 @@ function generateWelcomeText(
 function generateResetPasswordHtml(
   firstName: string,
   resetUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = env.APP_NAME,
   expiresInMinutes: number = 15,
 ): string {
   const userName = escapeHtml(firstName)
@@ -621,7 +637,7 @@ function generateResetPasswordHtml(
 function generateResetPasswordText(
   firstName: string,
   resetUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = env.APP_NAME,
   expiresInMinutes: number = 15,
 ): string {
   const year = new Date().getFullYear()
@@ -650,7 +666,7 @@ function generateAccountExistsHtml(
   firstName: string,
   signinUrl: string,
   forgotPasswordUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = env.APP_NAME,
 ): string {
   const userName = escapeHtml(firstName)
   const signin = escapeHtml(signinUrl)
@@ -796,7 +812,7 @@ function generateAccountExistsText(
   firstName: string,
   signinUrl: string,
   forgotPasswordUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = env.APP_NAME,
 ): string {
   const year = new Date().getFullYear()
 
@@ -812,6 +828,138 @@ function generateAccountExistsText(
     `Forgot your password? Reset it here: ${forgotPasswordUrl}`,
     ``,
     `Wasn't you? You can safely ignore this email - no changes were made to your account.`,
+    ``,
+    `---`,
+    `This is an automated message, please do not reply.`,
+    `© ${year} ${appName}. All rights reserved.`,
+  ].join("\n")
+}
+
+function generatePasswordChangedHtml(
+  firstName: string,
+  changedAt: string,
+  forgotPasswordUrl: string,
+  appName: string = env.APP_NAME,
+): string {
+  const userName = escapeHtml(firstName)
+  const when = escapeHtml(changedAt)
+  const forgotPassword = escapeHtml(forgotPasswordUrl)
+  const name = escapeHtml(appName)
+  const year = new Date().getFullYear()
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>Your password was changed</title>
+  <style>
+    body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+    a { color: #4f46e5; }
+    @media screen and (max-width: 600px) {
+      .container { width: 100% !important; }
+      .px { padding-left: 24px !important; padding-right: 24px !important; }
+      .h1 { font-size: 22px !important; line-height: 30px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f5f7;">
+  <!-- Preheader (hidden preview text) -->
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px; color:#f4f5f7; opacity:0;">
+    The password for your ${name} account was just changed.
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+        <table role="presentation" class="container" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px; max-width:560px;">
+
+          <!-- Brand -->
+          <tr>
+            <td align="center" style="padding-bottom:24px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size:20px; font-weight:700; color:#111827; letter-spacing:-0.2px;">
+              ${name}
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td class="px" style="padding:40px 48px 32px 48px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                    <h1 class="h1" style="margin:0 0 16px 0; font-size:24px; line-height:32px; font-weight:700; color:#111827;">
+                      Your password was changed
+                    </h1>
+                    <p style="margin:0 0 16px 0; font-size:16px; line-height:24px; color:#374151;">
+                      Hi ${userName},
+                    </p>
+                    <p style="margin:0 0 16px 0; font-size:16px; line-height:24px; color:#374151;">
+                      The password for your ${name} account was changed on ${when}. You have been signed out on your other devices.
+                    </p>
+                    <p style="margin:0; font-size:16px; line-height:24px; color:#374151;">
+                      If this was you, there's nothing else to do.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Divider -->
+                <tr>
+                  <td class="px" style="padding:0 48px;">
+                    <div style="height:1px; line-height:1px; font-size:1px; background-color:#e5e7eb;">&nbsp;</div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td class="px" style="padding:24px 48px 40px 48px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                    <p style="margin:0; font-size:14px; line-height:22px; color:#6b7280;">
+                      Wasn't you? <a href="${forgotPassword}" target="_blank" rel="noopener noreferrer" style="color:#4f46e5; text-decoration:underline;">Reset your password now</a> to take back your account.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding:24px 16px 0 16px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; color:#9ca3af;">
+              This is an automated message, please do not reply.<br />
+              &copy; ${year} ${name}. All rights reserved.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+}
+
+function generatePasswordChangedText(
+  firstName: string,
+  changedAt: string,
+  forgotPasswordUrl: string,
+  appName: string = env.APP_NAME,
+): string {
+  const year = new Date().getFullYear()
+
+  return [
+    `Your password was changed`,
+    ``,
+    `Hi ${firstName},`,
+    ``,
+    `The password for your ${appName} account was changed on ${changedAt}. You have been signed out on your other devices.`,
+    ``,
+    `If this was you, there's nothing else to do.`,
+    ``,
+    `Wasn't you? Reset your password now to take back your account: ${forgotPasswordUrl}`,
     ``,
     `---`,
     `This is an automated message, please do not reply.`,

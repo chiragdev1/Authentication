@@ -1,8 +1,13 @@
 import multer from 'multer'
+import sharp from 'sharp'
 import type { NextFunction, Request, Response } from 'express'
 import { ApiError } from '../../utils/api-error.js';
 
 export const AVATAR_MAX_FILE_SIZE = 2 * 1024 * 1024 // 2 MB
+
+const AVATAR_SIZE_PX = 512
+// a small file can still decode to a huge bitmap; refuse anything over ~24 megapixels before it is held in memory
+const AVATAR_MAX_INPUT_PIXELS = 24_000_000
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
@@ -54,16 +59,33 @@ export function uploadAvatar(req: Request, res: Response, next: NextFunction) {
       return next(ApiError.badRequest("Avatar file is required in the 'avatar' field"))
     }
 
-    // trust the file signature, not the client's mimetype or extension
-    const detectedType = detectImageType(req.file.buffer)
-    if(!detectedType) {
+    // trust the file signature, not the client's mimetype or extension; this is the cheap check before decoding
+    if(!detectImageType(req.file.buffer)) {
       return next(ApiError.badRequest('Only JPEG, PNG and WebP images are allowed'))
     }
 
-    req.file.mimetype = detectedType.mimeType
-    res.locals.imageExtension = detectedType.extension
-    next()
+    const file = req.file
+    reencodeAvatar(file.buffer).then((buffer) => {
+      file.buffer = buffer
+      file.size = buffer.length
+      file.mimetype = 'image/webp'
+      res.locals.imageExtension = 'webp'
+      next()
+    }, () => {
+      next(ApiError.badRequest('The image could not be read, please upload a valid JPEG, PNG or WebP file'))
+    })
   })
+}
+
+// decoding and encoding again keeps only the pixels: metadata such as GPS location is dropped,
+// and anything hidden after the image data (a polyglot file) doesn't survive
+function reencodeAvatar(buffer: Buffer) {
+  return sharp(buffer, {limitInputPixels: AVATAR_MAX_INPUT_PIXELS, failOn: 'error'})
+    // apply the EXIF orientation before it is stripped, so phone photos aren't saved sideways
+    .rotate()
+    .resize(AVATAR_SIZE_PX, AVATAR_SIZE_PX, {fit: 'cover'})
+    .webp({quality: 85})
+    .toBuffer()
 }
 
 function detectImageType(buffer: Buffer) {

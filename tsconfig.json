@@ -1,5 +1,7 @@
 {
   // Visit https://aka.ms/tsconfig to read more about this file
+  // tests live outside src and are run by vitest, so they aren't compiled into dist
+  "include": ["src"],
   "compilerOptions": {
     // File Layout
     "rootDir": "./src",

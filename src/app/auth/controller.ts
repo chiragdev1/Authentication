@@ -1,44 +1,45 @@
 import type {Request, Response} from 'express'
-import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 
-import { changePasswordPayloadModel, forgotPasswordPayloadModel, resetPasswordPayloadModel, signinPayloadModel, signupPayloadModel, verifyEmailPayloadModel } from './models.js';
+import { changePasswordPayloadModel, forgotPasswordPayloadModel, resetPasswordPayloadModel, sessionIdParamsModel, signinPayloadModel, signupPayloadModel, verifyEmailPayloadModel } from './models.js';
 import { db } from '../../db/index.js';
-import { usersTable } from '../../db/schema.js';
-import { and, eq, isNull, lt, or } from 'drizzle-orm';
-import { generateAccessToken, generateRefreshToken, getTokenExpiry, verifyRefreshToken } from './utils/jwt-token.js';
+import { sessionsTable, usersTable } from '../../db/schema.js';
+import { and, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
+import { verifyAccessToken, verifyRefreshToken } from './utils/jwt-token.js';
 import { ApiError } from '../../utils/api-error.js';
 import { ApiResponse } from '../../utils/api-response.js';
-import { cookieOptions, getFrontendUrl } from './utils/constants.js';
-import { sendAccountExistsMail, sendEmailVerificationMail, sendResetPasswordMail, sendWelcomeMail } from '../../utils/mail.js';
+import { ACCOUNT_EXISTS_MAIL_COOLDOWN_MS, getFrontendUrl, RESET_PASSWORD_MAIL_COOLDOWN_MS, TEMP_TOKEN_TTL_MS } from './utils/constants.js';
+import { clearAuthCookies, createSession, hashToken, revokeAllSessions, revokeSession, revokeSessionByRefreshToken, rotateSession, setAuthCookies } from './utils/session.js';
+import { sendAccountExistsMail, sendEmailVerificationMail, sendPasswordChangedMail, sendResetPasswordMail, sendWelcomeMail } from '../../utils/mail.js';
 import { deleteImage, uploadImage } from '../../utils/imagekit.js';
+import { hashPassword, verifyDummyPassword, verifyPassword } from '../../utils/password.js';
+import { isPasswordBreached } from '../../utils/breached-password.js';
+import { parseOrThrow } from '../../utils/parse-or-throw.js';
+
+const BREACHED_PASSWORD_MESSAGE = 'This password has appeared in a known data breach, please choose a different one'
 
 export class AuthController {
 
   public async handleSignup(req: Request, res: Response) {
-
-    // validate values from req.body
-    const validationResult = await signupPayloadModel.safeParseAsync(req.body)
-
-    // if validation failed throw badRequest error
-    if(!validationResult.success) {
-      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
-    }
-
-    const {firstName, lastName, age, email, password} = validationResult.data
+    const {firstName, lastName, age, email, password} = await parseOrThrow(signupPayloadModel, req.body)
 
     // same response whether or not the email is already registered, so this endpoint can't be used to check which emails have accounts;
     // the difference is only explained in the mail, which only the owner of the email can read
     const genericMessage = 'Check your email to finish creating your account'
 
-    // hash the password before checking the email, so both cases take about the same time
-    const hash = await bcrypt.hash(password, 10)
+    // checked before the email lookup, so the result says nothing about whether the account exists
+    if(await isPasswordBreached(password)) {
+      throw ApiError.badRequest(BREACHED_PASSWORD_MESSAGE)
+    }
 
-    const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
-    const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
+    // hash the password before checking the email, so both cases take about the same time
+    const hash = await hashPassword(password)
+
+    const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = createTempToken()
+    const emailVerificationTokenExpiry = new Date(Date.now() + TEMP_TOKEN_TTL_MS)
     const verificationUrl = `${getFrontendUrl()}/verify-email?token=${emailVerificationToken}`
 
-    // save the fields to the user; the unique email constraint decides if the account is new, so two signups at once can't both create it
+    // the unique email constraint decides if the account is new, so two signups at once can't both create it
     const [result] = await db.insert(usersTable).values({
       firstName,
       lastName,
@@ -54,7 +55,7 @@ export class AuthController {
     // new account: send the verification mail; the user can get a new one by signing up or signing in again if this fails
     if(result) {
       sendEmailVerificationMail(email, verificationUrl).catch((error) => {
-        console.error(`Failed to send verification mail to ${email}:`, error)
+        console.error(`Failed to send verification mail to user ${result.id}:`, error)
       })
       return ApiResponse.created(res, genericMessage)
     }
@@ -64,7 +65,7 @@ export class AuthController {
 
     // not verified yet: whoever controls the inbox hasn't claimed it, so the latest signup replaces the details and gets a new link.
     // only once the last link has expired, so a signup can't swap the password under a link that is still in the owner's inbox.
-    // clearing the refreshToken signs out anyone who signed in with the old password before verifying
+    // unverified accounts never get a session, so there are none to revoke here
     const [unverifiedUser] = await db.update(usersTable).set({
       firstName,
       lastName: lastName ?? null,
@@ -72,7 +73,6 @@ export class AuthController {
       password: hash,
       emailVerificationToken: hashedEmailVerificationToken,
       emailVerificationTokenExpiry,
-      refreshToken: null
     })
     .where(and(
       eq(usersTable.email, email),
@@ -83,14 +83,14 @@ export class AuthController {
 
     if(unverifiedUser) {
       sendEmailVerificationMail(email, verificationUrl).catch((error) => {
-        console.error(`Failed to send verification mail to ${email}:`, error)
+        console.error(`Failed to send verification mail to user ${unverifiedUser.id}:`, error)
       })
       return ApiResponse.created(res, genericMessage)
     }
 
     // verified: tell the owner someone tried to sign up with their email, at most once every 15 minutes so the inbox can't be flooded.
     // the check and the update are one query, so parallel signups can't both send the mail
-    const accountExistsMailCooldown = new Date(now.getTime() - (15*60*1000))
+    const accountExistsMailCooldown = new Date(now.getTime() - ACCOUNT_EXISTS_MAIL_COOLDOWN_MS)
 
     const [verifiedUser] = await db.update(usersTable).set({accountExistsMailSentAt: now})
     .where(and(
@@ -98,11 +98,11 @@ export class AuthController {
       eq(usersTable.emailVerified, true),
       or(isNull(usersTable.accountExistsMailSentAt), lt(usersTable.accountExistsMailSentAt, accountExistsMailCooldown))
     ))
-    .returning({firstName: usersTable.firstName})
+    .returning({id: usersTable.id, firstName: usersTable.firstName})
 
     if(verifiedUser) {
       sendAccountExistsMail(email, verifiedUser.firstName, `${getFrontendUrl()}/sign-in`, `${getFrontendUrl()}/forgot-password`).catch((error) => {
-        console.error(`Failed to send account exists mail to ${email}:`, error)
+        console.error(`Failed to send account exists mail to user ${verifiedUser.id}:`, error)
       })
     }
 
@@ -111,37 +111,26 @@ export class AuthController {
   }
 
   public async handleSignin(req: Request, res: Response) {
-    // validate input fields(email, password)
-    const validationResult = await signinPayloadModel.safeParseAsync(req.body)
+    const {email, password} = await parseOrThrow(signinPayloadModel, req.body)
 
-    // throw error if validation failed(400 badRequest)
-    if(!validationResult.success) {
-      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
-    }
-
-    const {email, password} = validationResult.data
-
-    // check if user with email exist in db
     const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.email, email))
-    // console.log('userInDb', userInDb)
 
-    // throw error if user not found
+    // still run a bcrypt compare when there is no account, otherwise the faster response would reveal that the email isn't registered
     if(!userInDb || !userInDb.password) {
+      await verifyDummyPassword(password)
       throw ApiError.unauthorized('Invalid email or password')
     }
 
-    // compare the passwords
-    const isPasswordValid = await bcrypt.compare(password, userInDb.password)
+    const {valid: isPasswordValid, needsRehash} = await verifyPassword(password, userInDb.password)
 
-    // throw error if password do not match(email or password is invalid)
     if(!isPasswordValid) {
       throw ApiError.unauthorized('Invalid email or password')
     }
 
     // no session until the email is verified, so nobody can get into an account before the inbox owner has claimed it
     if(!userInDb.emailVerified) {
-      const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
-      const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
+      const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = createTempToken()
+      const emailVerificationTokenExpiry = new Date(Date.now() + TEMP_TOKEN_TTL_MS)
 
       // send a new link only if the last one has expired, so signing in repeatedly doesn't send a new mail every time;
       // the check and the update are one query, so parallel sign ins can't both send it
@@ -156,48 +145,31 @@ export class AuthController {
       if(linkRenewed) {
         const verificationUrl = `${getFrontendUrl()}/verify-email?token=${emailVerificationToken}`
         sendEmailVerificationMail(userInDb.email, verificationUrl).catch((error) => {
-          console.error(`Failed to send verification mail to ${userInDb.email}:`, error)
+          console.error(`Failed to send verification mail to user ${userInDb.id}:`, error)
         })
       }
 
       throw ApiError.forbidden('Please verify your email before signing in, check your inbox for the verification link')
     }
 
-    // generate and assign tokens
-    const accessToken = generateAccessToken({userId: userInDb.id})
-    const refreshToken = generateRefreshToken({userId: userInDb.id})
-
-    // hash the refreshToken before saving it in db
-    const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex')
-
-    // save the hashed refreshToken in db
-    const [result] = await db.update(usersTable).set({refreshToken: hashedRefreshToken}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
-
-    if(!result) {
-      throw ApiError.internal('Could not save refresh token in db')
+    // the plain password is only available here, so this is when hashes made with an older, cheaper cost get upgraded.
+    // matching on the old hash means a password change in the meantime isn't overwritten
+    if(needsRehash) {
+      await db.update(usersTable).set({password: await hashPassword(password)})
+        .where(and(eq(usersTable.id, userInDb.id), eq(usersTable.password, userInDb.password)))
     }
 
-    // save the tokens in cookies/response data object
-    res.cookie('access_token', accessToken, {...cookieOptions, expires: getTokenExpiry(accessToken)})
-    res.cookie('refresh_token', refreshToken, {...cookieOptions, expires: getTokenExpiry(refreshToken)})
+    const tokens = await createSession(userInDb.id, req)
+    setAuthCookies(res, tokens)
 
-    // send the response
     return ApiResponse.ok(res, 'User signed in successfully', {id: userInDb.id})
   }
 
   public async handleVerifyEmail(req: Request, res: Response) {
+    // the token comes last so a token field in the body can't replace the one from the url
+    const {token, password} = await parseOrThrow(verifyEmailPayloadModel, {...req.body, token: req.params.token})
+    const hashedToken = hashToken(token)
 
-    // validate the token from req.params and the password from req.body
-    const validationResult = await verifyEmailPayloadModel.safeParseAsync({token: req.params.token, ...req.body})
-
-    if(!validationResult.success) {
-      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
-    }
-
-    const {token, password} =  validationResult.data
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
-
-    // search the db for the user with the token and check if it is valid and not expired
     const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.emailVerificationToken, hashedToken))
 
     const isTokenValid = userInDb && userInDb.emailVerificationTokenExpiry && userInDb.emailVerificationTokenExpiry > new Date()
@@ -208,7 +180,7 @@ export class AuthController {
 
     // the link only proves the inbox; the password proves this is the same person who signed up,
     // so someone who signed up with another person's email can't get the account verified with their own password
-    const isPasswordValid = userInDb.password ? await bcrypt.compare(password, userInDb.password) : false
+    const isPasswordValid = userInDb.password ? (await verifyPassword(password, userInDb.password)).valid : false
 
     if(!isPasswordValid) {
       // cancel the link, so the inbox owner can sign up again straight away and replace the details instead of waiting for it to expire
@@ -216,12 +188,10 @@ export class AuthController {
       throw ApiError.unauthorized('Incorrect password, this verification link has been cancelled. Sign up again or sign in to get a new link')
     }
 
-    // mark the email verified and remove the token; matching on the token means a signup that replaced the details in the meantime
-    // (and so the password just checked) makes this update do nothing.
-    // clearing the refreshToken signs out any session started before the email was verified
+    // matching on the token means a signup that replaced the details in the meantime (and so the password just checked) makes this update do nothing
     const [updateRes] = await db
       .update(usersTable)
-      .set({emailVerified: true, emailVerificationToken: null, emailVerificationTokenExpiry: null, refreshToken: null})
+      .set({emailVerified: true, emailVerificationToken: null, emailVerificationTokenExpiry: null})
       .where(and(eq(usersTable.id, userInDb.id), eq(usersTable.emailVerificationToken, hashedToken)))
       .returning({id: usersTable.id})
 
@@ -230,9 +200,8 @@ export class AuthController {
       throw ApiError.notFound('Invalid or expired email token')
     }
 
-    // send welcome mail now that signup is complete; a mail failure shouldn't fail verification
     sendWelcomeMail(userInDb.email, userInDb.firstName).catch((error) => {
-      console.error(`Failed to send welcome mail to ${userInDb.email}:`, error)
+      console.error(`Failed to send welcome mail to user ${userInDb.id}:`, error)
     })
 
     return ApiResponse.ok(res, 'Email verified successfully')
@@ -240,222 +209,212 @@ export class AuthController {
 
   public async handleLogout(req: Request, res: Response) {
     // no auth middleware here, so logout still works after the access token has expired
-    const refreshToken = req.cookies?.refresh_token
+    const refreshToken: string | undefined = req.cookies?.refresh_token
+    const accessToken: string | undefined = req.cookies?.access_token
 
-    // revoke the refreshToken in db; matching on the hash means only the owner of this token can revoke it
+    // matching on the token hash means only the holder of this token can end this session
     if(refreshToken) {
-      const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex')
-      await db.update(usersTable).set({refreshToken: null}).where(eq(usersTable.refreshToken, hashedRefreshToken))
+      await revokeSessionByRefreshToken(refreshToken)
+    } else if(accessToken) {
+      // without the refresh cookie, a still valid access token names the session instead
+      const claims = (() => {
+        try { return verifyAccessToken(accessToken) } catch { return null }
+      })()
+      if(claims) {
+        await revokeSession(claims.sid, claims.userId)
+      }
     }
 
-    // always clear both accessToken and refreshToken cookies
-    res.clearCookie('access_token', cookieOptions)
-    res.clearCookie('refresh_token', cookieOptions)
+    clearAuthCookies(res)
 
-    // send response
     return ApiResponse.ok(res, 'User logged out successfully')
   }
 
-  public async handleMe(req: Request, res: Response) {
+  public async handleLogoutAll(req: Request, res: Response) {
+    const userId = (req.user as any)?.id
 
+    await revokeAllSessions(userId)
+    clearAuthCookies(res)
+
+    return ApiResponse.ok(res, 'Signed out of all devices')
+  }
+
+  public async handleListSessions(req: Request, res: Response) {
+    const userId = (req.user as any)?.id
+
+    const sessions = await db.select({
+      id: sessionsTable.id,
+      userAgent: sessionsTable.userAgent,
+      ip: sessionsTable.ip,
+      createdAt: sessionsTable.createdAt,
+      lastUsedAt: sessionsTable.lastUsedAt,
+      expiresAt: sessionsTable.expiresAt,
+    })
+    .from(sessionsTable)
+    .where(and(eq(sessionsTable.userId, userId), isNull(sessionsTable.revokedAt), gt(sessionsTable.expiresAt, new Date())))
+    .orderBy(desc(sessionsTable.lastUsedAt))
+
+    return ApiResponse.ok(res, 'Sessions fetched successfully', sessions.map(session => ({...session, current: session.id === req.sessionId})))
+  }
+
+  public async handleRevokeSession(req: Request, res: Response) {
+    const userId = (req.user as any)?.id
+    const {id} = await parseOrThrow(sessionIdParamsModel, req.params)
+
+    // matching on the user means one user can't end another user's session by guessing its id
+    const revoked = await revokeSession(id, userId)
+
+    if(!revoked) {
+      throw ApiError.notFound('Session not found')
+    }
+
+    if(id === req.sessionId) {
+      clearAuthCookies(res)
+    }
+
+    return ApiResponse.ok(res, 'Session revoked successfully')
+  }
+
+  public async handleMe(req: Request, res: Response) {
     // the user is already authenticated via authenticate middleware
     const safeUser = req.user as any
 
-    // send Response
     return ApiResponse.ok(res, 'User details fetched successfully', safeUser)
   }
 
   public async handleRefresh(req: Request, res: Response) {
-    // get the tokens from the cookies
-    const refreshToken = req.cookies?.refresh_token
-    
+    const refreshToken: string | undefined = req.cookies?.refresh_token
+
     if(!refreshToken) {
       throw ApiError.unauthorized("Refresh token not provided")
     }
 
-    // validate the refreshToken and extract the userId from it
-    const {userId} = verifyRefreshToken(refreshToken)
+    const claims = verifyRefreshToken(refreshToken)
 
-    // hash the refreshToken before searching it in db
-    const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex')
+    const [userInDb] = await db.select({id: usersTable.id, emailVerified: usersTable.emailVerified}).from(usersTable).where(eq(usersTable.id, claims.userId))
 
-    // search the db for the hashed token
-    const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.refreshToken, hashedRefreshToken))
-
-    // for double checking check if the userId from the token matches the userId from the db
-    if(!userInDb || userInDb.id !== userId) {
+    if(!userInDb) {
       throw ApiError.unauthorized("Invalid or expired refresh token")
     }
 
-    // sessions from before sign in required a verified email can't be renewed
     if(!userInDb.emailVerified) {
       throw ApiError.forbidden("Please verify your email before signing in")
     }
 
-    // if refreshTOken match then generate new accessToken and refreshToken
-    const newAccessToken = generateAccessToken({userId: userInDb.id})
-    const newRefreshToken = generateRefreshToken({userId: userInDb.id})
+    // a failed rotation doesn't clear the cookies: when two tabs race, the winner's new cookie is already in the browser
+    const tokens = await rotateSession(claims, refreshToken)
+    setAuthCookies(res, tokens)
 
-    // hash the new refreshToken before saving it in db
-    const newHashedRefreshToken = crypto.createHash('sha256').update(newRefreshToken).digest('hex')
-
-    // save the new refreshToken in db
-    const [result] = await db.update(usersTable).set({refreshToken: newHashedRefreshToken}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
-    
-    // send error if the db update failed
-    if(!result) {
-      throw ApiError.internal("Could not update refresh token in db")
-    }
-
-    // set the tokens in cookies
-    res.cookie('access_token', newAccessToken, {...cookieOptions, expires: getTokenExpiry(newAccessToken)})
-    res.cookie('refresh_token', newRefreshToken, {...cookieOptions, expires: getTokenExpiry(newRefreshToken)})
-
-    // send response
     return ApiResponse.ok(res, 'Refresh token validated successfully', {id: userInDb.id})
   }
 
   public async handleForgotPassword(req: Request, res: Response) {
-    // validate the email in zod
-    const validationResult = await forgotPasswordPayloadModel.safeParseAsync(req.body)
+    const {email} = await parseOrThrow(forgotPasswordPayloadModel, req.body)
 
-    if(!validationResult.success) {
-      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
-    }
-
-    const {email} = validationResult.data
-
-    // search the db for email
-    const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.email, email))
-
-    // same response whether or not the user exists, so this endpoint can't be used to check which emails are registered
-    const genericMessage = 'If an account with this email exists, a reset password email has been sent'
-
-    if(!userInDb) {
-      return ApiResponse.ok(res, genericMessage)
-    }
-
-    // generate a resetPasswordToken and save it in db with expiry
-    const {token: resetPasswordToken, hashedToken: hashedResetPasswordToken} = await createTempToken()
-    const resetPasswordTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
-
-    // sve the resetPasswordToken and resetPasswordTokenExpiry in db
-    const [result] = await db.update(usersTable).set({resetPasswordToken: hashedResetPasswordToken, resetPasswordTokenExpiry}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
-
-    // if no row returned, send 500 error
-    if(!result) {
-      throw ApiError.internal('Could not save reset password token in db')
-    }
-
-    // create the reset password url pointing at the frontend page
-    const resetUrl = `${getFrontendUrl()}/reset-password?token=${resetPasswordToken}`
-
-    // send the reset password email without awaiting it, so a mail failure or the extra delay doesn't reveal that the user exists
-    sendResetPasswordMail(userInDb.email, userInDb.firstName, resetUrl).catch((error) => {
-      console.error(`Failed to send reset password mail to ${userInDb.email}:`, error)
+    // the lookup, token write and mail run after the response is sent, so the response time is the same whether or not the account exists
+    issueResetPasswordLink(email).catch((error) => {
+      console.error('Failed to issue reset password link:', error)
     })
 
-    // send response
-    return ApiResponse.ok(res, genericMessage)
+    return ApiResponse.ok(res, 'If an account with this email exists, a reset password email has been sent')
   }
 
   public async handleResetPassword(req: Request, res: Response) {
-    // get the token from req.params
-    const token = req.params.token
+    const {token, newPassword} = await parseOrThrow(resetPasswordPayloadModel, {...req.body, token: req.params.token})
+    const hashedToken = hashToken(token)
 
-    // validate the token and newPassword in zod
-    const validationResult = await resetPasswordPayloadModel.safeParseAsync({token, ...req.body})
-    
-    // if validation failed throw badRequest error
-    if(!validationResult.success) {
-      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
-    }
+    // a cheap check first, so an invalid link doesn't cost a breach lookup and a bcrypt hash
+    const [userInDb] = await db.select({id: usersTable.id}).from(usersTable)
+      .where(and(eq(usersTable.resetPasswordToken, hashedToken), gt(usersTable.resetPasswordTokenExpiry, new Date())))
 
-    // extract the token and newPassword from the validated data
-    const {token: resetPasswordToken, newPassword} = validationResult.data
-
-    // hash the token and search the db for the user with the hashed token
-    const hashedToken = crypto.createHash('sha256').update(resetPasswordToken).digest('hex')
-
-    const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.resetPasswordToken, hashedToken))
-
-    // if user not found or token expired, send 404 error
-    const isTokenValid = userInDb && userInDb.resetPasswordTokenExpiry && userInDb.resetPasswordTokenExpiry > new Date()
-
-    if(!userInDb || !isTokenValid) {
+    if(!userInDb) {
       throw ApiError.notFound('Invalid or expired reset password token')
     }
 
-    // hash the new password
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10)
-
-    // if valid, update the password, remove the reset token fields, and clear the refreshToken so existing sessions are signed out
-    const [result] = await db.update(usersTable).set({password: hashedNewPassword, resetPasswordToken: null, resetPasswordTokenExpiry: null, refreshToken: null}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
-
-    // if no row returned, send 500 error
-    if(!result) {
-      throw ApiError.internal('Could not update password in db')
+    if(await isPasswordBreached(newPassword)) {
+      throw ApiError.badRequest(BREACHED_PASSWORD_MESSAGE)
     }
 
-    // send response
-    return ApiResponse.ok(res, 'Password reset successfully', {id: result?.id})
+    const hashedNewPassword = await hashPassword(newPassword)
+
+    // the update matches on the token again, so two resets with the same link can't both succeed.
+    // the link proves the inbox, so it also verifies the email; every session is ended because the old password may be known to someone else
+    const updatedUser = await db.transaction(async (tx) => {
+      const [updated] = await tx.update(usersTable).set({
+        password: hashedNewPassword,
+        resetPasswordToken: null,
+        resetPasswordTokenExpiry: null,
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationTokenExpiry: null,
+      })
+      .where(and(eq(usersTable.resetPasswordToken, hashedToken), gt(usersTable.resetPasswordTokenExpiry, new Date())))
+      .returning({id: usersTable.id, email: usersTable.email, firstName: usersTable.firstName})
+
+      if(!updated) {
+        throw ApiError.notFound('Invalid or expired reset password token')
+      }
+
+      await revokeAllSessions(updated.id, {}, tx)
+      return updated
+    })
+
+    sendPasswordChangedMail(updatedUser.email, updatedUser.firstName, `${getFrontendUrl()}/forgot-password`).catch((error) => {
+      console.error(`Failed to send password changed mail to user ${updatedUser.id}:`, error)
+    })
+
+    return ApiResponse.ok(res, 'Password reset successfully', {id: updatedUser.id})
   }
 
   public async handleChangePassword(req: Request, res: Response) {
-    // get the id from req.user
     const userId = (req.user as any)?.id
 
-    // validate the currentPassword and newPassword in zod
-    const validationResult = await changePasswordPayloadModel.safeParseAsync(req.body)
+    const {currentPassword, newPassword} = await parseOrThrow(changePasswordPayloadModel, req.body)
 
-    if(!validationResult.success) {
-      throw ApiError.badRequest(`Invalid input fields: ${validationResult.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`)
-    }
-
-    const {currentPassword, newPassword} = validationResult.data
-
-    // search the db for user with id
-    const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.id, userId))
+    const [userInDb] = await db.select({id: usersTable.id, email: usersTable.email, firstName: usersTable.firstName, password: usersTable.password}).from(usersTable).where(eq(usersTable.id, userId))
 
     if(!userInDb || !userInDb.password) {
       throw ApiError.unauthorized('User not found')
     }
 
-    // compare the currentPassword with the password in db
-    const isPasswordValid = await bcrypt.compare(currentPassword, userInDb.password)
+    const {valid: isPasswordValid} = await verifyPassword(currentPassword, userInDb.password)
 
     if(!isPasswordValid) {
       throw ApiError.badRequest('Current password is incorrect')
     }
 
-    // hash the newPassword
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10)
-
-    // rotate the refreshToken so sessions on other devices are signed out, while this one stays signed in
-    const accessToken = generateAccessToken({userId: userInDb.id})
-    const refreshToken = generateRefreshToken({userId: userInDb.id})
-    const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex')
-
-    // update the password and refreshToken in db
-    const [result] = await db.update(usersTable).set({password: hashedNewPassword, refreshToken: hashedRefreshToken}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
-
-    if(!result) {
-      throw ApiError.internal('Could not update password in db')
+    if(await isPasswordBreached(newPassword)) {
+      throw ApiError.badRequest(BREACHED_PASSWORD_MESSAGE)
     }
 
-    // set the new tokens in cookies
-    res.cookie('access_token', accessToken, {...cookieOptions, expires: getTokenExpiry(accessToken)})
-    res.cookie('refresh_token', refreshToken, {...cookieOptions, expires: getTokenExpiry(refreshToken)})
+    const hashedNewPassword = await hashPassword(newPassword)
+    const oldPasswordHash = userInDb.password
 
-    // send response
-    return ApiResponse.ok(res, 'Password changed successfully', {id: result.id})
+    // matching on the old hash means two changes at once can't both pass the current password check and overwrite each other.
+    // other devices are signed out; this session stays, and its tokens are still valid because the session is
+    await db.transaction(async (tx) => {
+      const [updated] = await tx.update(usersTable).set({password: hashedNewPassword})
+        .where(and(eq(usersTable.id, userId), eq(usersTable.password, oldPasswordHash)))
+        .returning({id: usersTable.id})
+
+      if(!updated) {
+        throw ApiError.conflict('The password was changed by another request, please try again')
+      }
+
+      await revokeAllSessions(userId, {except: req.sessionId}, tx)
+    })
+
+    sendPasswordChangedMail(userInDb.email, userInDb.firstName, `${getFrontendUrl()}/forgot-password`).catch((error) => {
+      console.error(`Failed to send password changed mail to user ${userInDb.id}:`, error)
+    })
+
+    return ApiResponse.ok(res, 'Password changed successfully', {id: userInDb.id})
   }
 
   public async handleUploadAvatar(req: Request, res: Response) {
-    // get the id from req.user
     const userId = (req.user as any)?.id
 
-    // the file is already parsed and its type checked by the uploadAvatar middleware
+    // the file is already parsed, checked and re-encoded by the uploadAvatar middleware
     const file = req.file
     const extension: string | undefined = res.locals.imageExtension
 
@@ -496,16 +455,41 @@ export class AuthController {
       })
     }
 
-    // send response
     return ApiResponse.ok(res, 'Avatar uploaded successfully', {avatarUrl: uploadedAvatar.url})
   }
 
 }
 
-async function createTempToken() {
-  
+function createTempToken() {
   const token = crypto.randomBytes(32).toString('hex')
-  const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
+  return {token, hashedToken: hashToken(token)}
+}
 
-  return {token, hashedToken}
+// a new link is issued at most once every 2 minutes; the cooldown check and the token write are one query,
+// so parallel requests can't both send a mail. an unknown email simply matches no row
+async function issueResetPasswordLink(email: string) {
+  const {token, hashedToken} = createTempToken()
+  const now = new Date()
+  const cooldown = new Date(now.getTime() - RESET_PASSWORD_MAIL_COOLDOWN_MS)
+
+  const [userInDb] = await db.update(usersTable).set({
+    resetPasswordToken: hashedToken,
+    resetPasswordTokenExpiry: new Date(now.getTime() + TEMP_TOKEN_TTL_MS),
+    resetPasswordMailSentAt: now,
+  })
+  .where(and(
+    eq(usersTable.email, email),
+    or(isNull(usersTable.resetPasswordMailSentAt), lt(usersTable.resetPasswordMailSentAt, cooldown))
+  ))
+  .returning({id: usersTable.id, email: usersTable.email, firstName: usersTable.firstName})
+
+  if(!userInDb) {
+    return
+  }
+
+  const resetUrl = `${getFrontendUrl()}/reset-password?token=${token}`
+
+  sendResetPasswordMail(userInDb.email, userInDb.firstName, resetUrl).catch((error) => {
+    console.error(`Failed to send reset password mail to user ${userInDb.id}:`, error)
+  })
 }

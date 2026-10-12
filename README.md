@@ -9,16 +9,18 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
 
 ## Features
 
-- **Sign-up and sign-in** with Zod validation and bcrypt password hashing.
+- **Sign-up and sign-in** with Zod validation, bcrypt password hashing (cost 12) and a check against known-breached passwords.
 - **Email verification** with single-use links that expire after 15 minutes, sent through [Resend](https://resend.com).
-- **Session handling** with short-lived access tokens and refresh tokens that are replaced on every use, both stored in `httpOnly` cookies.
-- **Password management:** forgot password, reset password and change password.
-- **Avatar uploads** to [ImageKit](https://imagekit.io). The real file type is checked from the file's contents, and old images are cleaned up automatically.
+- **Sessions per device**, with short-lived access tokens and refresh tokens that are replaced on every use, both in `httpOnly` cookies. Users can list their sessions, end one, or sign out everywhere, and ending a session takes effect immediately.
+- **Password management:** forgot password, reset password and change password, with a "your password was changed" email.
+- **Avatar uploads** to [ImageKit](https://imagekit.io). The real file type is checked from the file's contents, images are re-encoded to strip metadata, and old images are cleaned up automatically.
+- **Rate limiting** per IP, per email and per user, shared through Redis.
 - **Built with security in mind:**
   - Every token is stored hashed.
   - Responses never reveal whether an email is registered.
   - Sign-in requires a verified email.
   - Database updates are safe when requests arrive at the same time.
+  - A reused refresh token is detected and ends the session.
 
 ## Tech stack
 
@@ -27,9 +29,11 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
 | Runtime | Node.js, TypeScript, Express 5 |
 | Database | PostgreSQL 17 (Docker), Drizzle ORM |
 | Validation | Zod |
-| Auth | JSON Web Tokens (`jsonwebtoken`), `bcryptjs` |
+| Auth | JSON Web Tokens (`jsonwebtoken`), `bcrypt` |
+| Security | `helmet`, `cors`, `express-rate-limit` with Redis |
 | Email | Resend |
-| File uploads | Multer (in-memory), ImageKit |
+| File uploads | Multer (in-memory), `sharp`, ImageKit |
+| Tests | Vitest, Supertest |
 
 ---
 
@@ -39,7 +43,7 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
 
 - **Node.js 20+** (developed on Node 24)
 - **pnpm**: run `corepack enable` to use the version pinned in `package.json`
-- **Docker**, for the local PostgreSQL database
+- **Docker**, for the local PostgreSQL database and Redis
 - A **Resend** API key (for emails) and an **ImageKit** private key (for avatars)
 
 ### 1. Install dependencies
@@ -54,22 +58,24 @@ pnpm install
 cp .env.sample .env
 ```
 
-Then open `.env` and fill in the values:
+Then open `.env` and fill in the values. Every variable is checked at startup; if one is missing or invalid, the server prints which and exits.
 
 | Variable | Required | Description |
 |---|---|---|
 | `PORT` | No | Port the API listens on. Default: `8080`. |
 | `NODE_ENV` | No | `development` or `production`. In production, cookies are sent over HTTPS only. |
 | `DATABASE_URL` | Yes | PostgreSQL connection string. The sample value matches `docker-compose.yml`. |
-| `ACCESS_TOKEN_SECRET_KEY` | Yes | Secret used to sign access tokens. |
-| `REFRESH_TOKEN_SECRET_KEY` | Yes | Secret used to sign refresh tokens. **Must be different** from the access token secret. |
-| `ACCESS_TOKEN_EXPIRY` | Yes | Access token lifetime, e.g. `15m`. |
-| `REFRESH_TOKEN_EXPIRY` | Yes | Refresh token lifetime, e.g. `1d`. |
+| `ACCESS_TOKEN_SECRET_KEY` | Yes | Secret used to sign access tokens. At least 32 characters. |
+| `REFRESH_TOKEN_SECRET_KEY` | Yes | Secret used to sign refresh tokens. At least 32 characters, and **must be different** from the access token secret. |
+| `ACCESS_TOKEN_EXPIRY` | No | Access token lifetime. Default: `15m`. |
+| `REFRESH_TOKEN_EXPIRY` | No | Refresh token lifetime, which is also how long an unused session lasts. Default: `7d`. |
 | `APP_NAME` | No | Name shown in emails. Default: `DSADEN`. |
 | `RESEND_API_KEY` | Yes | Resend API key (starts with `re_`). **The server won't start without it.** |
 | `EMAIL_FROM` | Yes | Sender address on a domain verified in Resend, e.g. `"YourApp <no-reply@mail.yourdomain.com>"`. |
-| `FRONTEND_URL` | Yes | Base URL of your frontend. Links in emails point here. Default: `http://localhost:3000`. |
+| `FRONTEND_URL` | In production | Base URL of your frontend. Links in emails point here, and it is the only origin allowed by CORS. Default in development: `http://localhost:3000`. |
 | `IMAGEKIT_PRIVATE_KEY` | For avatars | ImageKit private API key. The server starts without it; only avatar uploads fail. |
+| `REDIS_URL` | In production | Redis for rate-limit counts, e.g. `redis://localhost:6379`. Without it each server process counts on its own, which is fine for local development. |
+| `TRUST_PROXY` | Behind a proxy | How many reverse proxies sit in front of the API. Default: `0`. **Set it correctly**, or per-IP rate limits either lump every user together or can be dodged with a fake `X-Forwarded-For` header. |
 
 Generate strong JWT secrets with:
 
@@ -80,7 +86,7 @@ node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ### 3. Start the database and run migrations
 
 ```bash
-pnpm db:up        # starts PostgreSQL in Docker
+pnpm db:up        # starts PostgreSQL and Redis in Docker
 pnpm db:migrate   # creates the tables
 ```
 
@@ -106,7 +112,8 @@ curl http://localhost:8080/
 | `pnpm dev` | Compiles in watch mode and restarts the server on every change. |
 | `pnpm build` | Compiles TypeScript to `dist/`. Also the project's type check. |
 | `pnpm start` | Runs the compiled server from `dist/`. |
-| `pnpm db:up` / `pnpm db:down` | Starts / stops the PostgreSQL container. |
+| `pnpm test` | Runs the test suite against a separate `<database>_test` database, created and migrated automatically. Emails, the breached-password check and ImageKit are mocked. |
+| `pnpm db:up` / `pnpm db:down` | Starts / stops the PostgreSQL and Redis containers. |
 | `pnpm db:generate` | Creates a new migration after you change `src/db/schema.ts`. |
 | `pnpm db:migrate` | Applies pending migrations to the database. |
 | `pnpm drizzle:studio` | Opens Drizzle Studio to browse the database. |
@@ -120,17 +127,21 @@ curl http://localhost:8080/
 ```
 src/
 ├── index.ts                    # Entry point: starts the HTTP server
+├── config/
+│   └── env.ts                  # Validates environment variables at startup
 ├── app/
 │   ├── index.ts                # Express app: middleware, routes, error handler
 │   ├── auth/
 │   │   ├── routes.ts           # Endpoint → middleware → controller wiring
 │   │   ├── controller.ts       # Request handlers (AuthController)
 │   │   ├── models.ts           # Zod schemas for request bodies
-│   │   ├── middleware.ts       # authenticateToken: reads the access token cookie
-│   │   └── utils/              # JWT helpers, cookie options, frontend URL
+│   │   ├── middleware.ts       # authenticateToken: checks the access token and its session
+│   │   └── utils/              # JWT helpers, sessions, cookie options, constants
 │   └── middlewares/
 │       ├── error-handler.ts    # Turns errors into JSON responses
-│       └── upload-multer.ts    # Avatar upload parsing and validation
+│       ├── rate-limit.ts       # Per-IP, per-email and per-user limits
+│       ├── require-json.ts     # Rejects non-JSON bodies (CSRF protection)
+│       └── upload-multer.ts    # Avatar upload parsing, validation and re-encoding
 ├── db/
 │   ├── index.ts                # Drizzle database client
 │   └── schema.ts               # Table definitions
@@ -138,7 +149,11 @@ src/
     ├── api-error.ts            # ApiError: errors with an HTTP status
     ├── api-response.ts         # ApiResponse: consistent success responses
     ├── mail.ts                 # Email sending and templates
-    └── imagekit.ts             # ImageKit upload and delete
+    ├── imagekit.ts             # ImageKit upload and delete
+    ├── password.ts             # bcrypt hashing and verification
+    ├── breached-password.ts    # Have I Been Pwned check
+    └── parse-or-throw.ts       # Zod validation → 400
+tests/                          # Vitest + Supertest integration tests
 drizzle/                        # Generated SQL migrations
 docs/API.md                     # API reference
 ```
@@ -149,35 +164,31 @@ docs/API.md                     # API reference
 
 1. **Sign up.** The user is created as *unverified* and receives a verification email.
 2. **Verify.** The email link opens your frontend's `/verify-email?token=…` page. The user enters their password, and the frontend sends it to the API with the token. Asking for the password proves that the person who owns the inbox is the same person who signed up.
-3. **Sign in.** Only verified users can sign in. The API sets two `httpOnly` cookies:
+3. **Sign in.** Only verified users can sign in. Each sign-in creates a row in the `sessions` table, and the API sets two `httpOnly` cookies that both name that session:
    - `access_token`: short-lived, sent with every request.
-   - `refresh_token`: longer-lived, used only to get a new access token.
-4. **Refresh.** When the access token expires, call `/auth/refresh`. Both tokens are replaced, and the old refresh token stops working.
-5. **Log out**, or reset or change the password, to end sessions:
-   - Logging out ends the current session.
+   - `refresh_token`: longer-lived, sent only to `/auth/*` and used to get a new access token.
+4. **Refresh.** When the access token expires, call `/auth/refresh`. Both tokens are replaced, and the old refresh token stops working. If an old refresh token is used again later, someone kept a copy, so the session is revoked.
+5. **End sessions:**
+   - Logging out ends the current session; `logout-all` ends all of them, and `DELETE /auth/sessions/:id` ends one.
    - A password reset signs out every device.
    - A password change signs out every device except the current one.
 
-Cookies are `httpOnly` and `SameSite=Lax`, and `Secure` in production. Frontend code never reads or stores tokens itself.
+Every authenticated request checks that its session is still active, so **ending a session takes effect immediately**, including for access tokens already issued.
 
-Two consequences:
-- **Deploy the frontend and API on the same site** (e.g. `app.example.com` and `api.example.com`). Browsers don't send `Lax` cookies across different sites.
-- **Ending a session takes effect gradually.** The refresh token is revoked immediately, but an access token that was already issued stays valid until it expires (`ACCESS_TOKEN_EXPIRY`).
+Cookies are `httpOnly` and `SameSite=Lax`, and `Secure` in production. Frontend code never reads or stores tokens itself. **Deploy the frontend and API on the same site** (e.g. `app.example.com` and `api.example.com`); browsers don't send `Lax` cookies across different sites.
 
 ## Security notes
 
-- Passwords are hashed with bcrypt. Refresh, verification and reset tokens are stored as SHA-256 hashes, so a database leak does not expose working tokens.
-- Sign-up, sign-in and forgot-password give the same response whether or not an account exists, so the API can't be used to find out which emails are registered.
-- Uploaded avatars are checked by their file contents, not the type the client claims. Files are stored under random names, so URLs don't expose user IDs.
+- Passwords are hashed with bcrypt at cost 12; older, cheaper hashes are upgraded at sign-in. New passwords are checked against Have I Been Pwned.
+- Refresh, verification and reset tokens are stored as SHA-256 hashes, so a database leak does not expose working tokens.
+- Sign-up, sign-in and forgot-password give the same response, in about the same time, whether or not an account exists.
+- Only JSON bodies are accepted (plus multipart for avatars), and CORS allows only `FRONTEND_URL`, so other websites can't make a signed-in browser call the API. `helmet` sets the standard security headers.
+- Uploaded avatars are checked by their file contents, then re-encoded, which drops metadata such as GPS location. Files are stored under random names, so URLs don't expose user IDs.
 
 ### Known limitations
 
-These are planned but not done yet:
-
-- **No rate limiting.** Put the API behind a proxy or firewall that limits requests until this is added.
-- **No CORS configuration.** Browsers can only call the API from the same origin, or through a proxy such as the frontend dev server's proxy. A frontend on another origin needs CORS added first.
-- **Malformed or oversized (over 50 KB) JSON bodies return `500`** instead of `400`/`413`.
-- **No automated tests yet.**
+- **The per-email sign-in limit can be used to lock someone out** for 15 minutes by failing 5 times with their email. This is the usual trade-off of per-account limits.
+- **Avatar upload accepts `multipart/form-data`**, which a form on a sibling subdomain could send. Changing an avatar is low impact, but a custom header requirement would close it.
 
 ---
 

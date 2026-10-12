@@ -1,6 +1,6 @@
 # Dev Log: Authentication Service
 
-**Stack:** TypeScript · Express 5 · PostgreSQL 17 (Docker) · Drizzle ORM · Zod · JWT · bcrypt · Resend · Multer + ImageKit
+**Stack:** TypeScript · Express 5 · PostgreSQL 17 (Docker) · Drizzle ORM · Zod · JWT · bcrypt · Resend · Multer + sharp + ImageKit · express-rate-limit + Redis · Vitest
 
 Newest entries go at the bottom, under a dated heading.
 
@@ -55,14 +55,28 @@ Newest entries go at the bottom, under a dated heading.
 - Added `README.md` (setup, environment variables, how auth works, known limitations), `docs/API.md` (every endpoint with requests, responses, errors and typical flows for frontend developers) and `CLAUDE.md` (conventions and security rules for AI assistants).
 - Writing the docs turned up two gaps: **no CORS configuration**, and **malformed JSON returns 500** instead of 400.
 
+## 12 Oct 2026 · Professional review fixes (BREAKING CHANGE)
+A review rated the service 7/10 and listed twelve problems. All of them are fixed:
+- **Sessions table.** Each sign-in is its own row, so devices no longer sign each other out. Refresh tokens rotate with a conditional update; replaying an old one after a 10-second grace window revokes the session. New `logout-all`, `GET /sessions` and `DELETE /sessions/:id`.
+- **Instant sign-out.** Access tokens carry the session id, and `authenticateToken` joins the session, so logout and password changes end access tokens straight away. Closes the "no access-token denylist" gap with no extra query.
+- **Timing leaks closed.** Sign-in runs a dummy bcrypt compare for unknown emails; forgot-password does its work after responding.
+- **Races closed.** A reset link can only be used once, even in parallel; two password changes at once can't both win (`409`).
+- **Passwords.** Native `bcrypt` at cost 12, with older hashes upgraded at sign-in. New passwords must be at least 8 characters and at most 72 *bytes*, and are checked against Have I Been Pwned.
+- **Emails.** "Your password was changed" after a reset or change. Forgot-password has a 2-minute cooldown. A completed reset also verifies the email.
+- **Rate limiting** with express-rate-limit and Redis: per IP, per email (sign-in failures, forgot-password) and per user.
+- **Browser hardening.** JSON-only bodies (`415` otherwise), CORS limited to `FRONTEND_URL`, `helmet`, and the refresh cookie scoped to `/auth`.
+- **Avatars** are re-encoded with sharp to a 512px WebP, which strips metadata such as GPS location.
+- **Config and errors.** Environment variables are validated at startup; malformed or oversized JSON returns `400`/`413` instead of `500`; `age` is capped at 150; logs show user IDs instead of email addresses.
+- **First test suite** (Vitest + Supertest against a separate test database).
+- The `refresh_token` column is dropped, so **everyone is signed out once** on deploy.
+
 ---
 
 ## Lessons
 Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.md](LEARNINGS.md).
 
 ## Next up
-- Rate limiting (design ready: Redis store, separate limits per IP and per email).
-- CORS configuration for a frontend on another origin.
-- Return 400, not 500, for malformed JSON bodies.
-- Frontend updates: a password field on the verify page and handling the 403 on sign-in.
-- Possibly let a password reset also mark the email as verified.
+- Frontend: password field on the verify page, handle the 403 on sign-in, a single in-flight refresh with a retry on the "refreshed by another request" 401, and a sessions page.
+- Start Redis (`pnpm db:up`) and set `REDIS_URL` and `TRUST_PROXY` in each environment.
+- Consider an absolute session lifetime (sessions currently last as long as they keep refreshing).
+- Account deletion and email change.
