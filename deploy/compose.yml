@@ -1,0 +1,150 @@
+# production stack for a single VPS: `cd deploy && docker compose up -d --build` (see README "Deploying").
+# only nginx publishes ports. docker writes its own firewall rules and ignores ufw, so anything published here is
+# on the internet; postgres, redis and the services stay on the backend network with no ports at all
+name: authentication-microservices-prod
+
+x-node: &node
+  build:
+    context: ..
+    target: runtime
+  image: authentication-microservices:latest
+  restart: unless-stopped
+  # node as pid 1 ignores SIGTERM, so without an init every `docker compose down` waits out the 10 second kill
+  init: true
+  env_file: .env
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
+
+x-service-env: &service-env
+  NODE_ENV: production
+  # in their own containers the services can't share loopback; the backend network, which publishes nothing, takes its place
+  SERVICE_HOST: 0.0.0.0
+  AUTH_SERVICE_URL: http://auth-service:9001
+  MEDIA_SERVICE_URL: http://media-service:9002
+  REDIS_URL: redis://redis:6379
+  FRONTEND_URL: https://${FRONTEND_DOMAIN:?set FRONTEND_DOMAIN in deploy/.env}
+  # nginx is the one proxy in front of the gateway
+  TRUST_PROXY: 1
+
+services:
+  nginx:
+    image: nginx:stable
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in deploy/.env}
+    # reloads every 6 hours to pick up certificates certbot has renewed. the image only fills in templates/ when the
+    # command is nginx, so the loop runs beside its entrypoint instead of replacing it
+    entrypoint: ["/bin/sh", "-c", "(while :; do sleep 6h; nginx -s reload; done) & exec /docker-entrypoint.sh nginx -g 'daemon off;'"]
+    volumes:
+      - ./nginx:/etc/nginx/templates:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    networks: [edge]
+    depends_on: [gateway]
+
+  # renews the certificate twice a day when it is close to expiring; the first one is issued by hand (README "Deploying")
+  certbot:
+    image: certbot/certbot
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+
+  gateway:
+    <<: *node
+    working_dir: /app/services/gateway
+    command: ["node", "dist/index.js"]
+    environment: *service-env
+    networks: [edge, backend]
+    depends_on: [auth-service, media-service]
+
+  auth-service:
+    <<: *node
+    working_dir: /app/services/auth-service
+    command: ["node", "dist/index.js"]
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/auth_microservices
+    networks: [backend]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+
+  media-service:
+    <<: *node
+    working_dir: /app/services/media-service
+    command: ["node", "dist/index.js"]
+    environment: *service-env
+    networks: [backend]
+    depends_on:
+      redis: {condition: service_healthy}
+
+  notification-service:
+    <<: *node
+    working_dir: /app/services/notification-service
+    command: ["node", "dist/index.js"]
+    environment: *service-env
+    networks: [backend]
+    depends_on:
+      redis: {condition: service_healthy}
+
+  # applies pending migrations, then exits; auth-service waits for it on every `up`
+  migrate:
+    <<: *node
+    build:
+      context: ..
+      target: build
+    image: authentication-microservices-build:latest
+    restart: "no"
+    working_dir: /app/services/auth-service
+    command: ["pnpm", "db:migrate"]
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/auth_microservices
+    networks: [backend]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: auth_microservices
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d auth_microservices"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # the queue holds emails not yet sent; append-only keeps them across a restart
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+networks:
+  # nginx and the gateway only, so the internet-facing proxy can't reach the services or databases directly
+  edge:
+  backend:
+
+volumes:
+  pgdata:
+  redisdata:
+  # tls certificates; losing them means asking let's encrypt again, which is rate limited
+  letsencrypt:
+  certbot_www:

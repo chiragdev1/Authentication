@@ -86,13 +86,18 @@ A trial of the monolith as a pnpm workspace, run as a **separate application** n
 - `pnpm --filter @authentication/notification-service preview` renders samples to `preview/`. Tests check that names are escaped, that every link is in both parts, and that the change time is shown.
 - Sender switched to `no-reply@dsaden.com`, the domain verified in Resend (`mail.dsaden.com` was refused).
 
+## 12 Oct 2026 · Production deployment (microservices branch)
+- A multi-stage `Dockerfile` builds one image for every service. The runtime stage holds production dependencies and `dist` only. The build stage also runs `drizzle-kit migrate`.
+- `deploy/compose.yml` for a single VPS: nginx is the only container with published ports, with Let's Encrypt certificates from a `certbot` container (the first issued by hand, renewals through nginx's webroot, nginx reloading every 6 hours). nginx overwrites `X-Forwarded-For` rather than appending to it, since the services trust that hop, and resolves the gateway per request so a restarted container doesn't leave it pointing at a dead address. Its body limit is raised from the 1 MB default, which would refuse 2 MB avatars. It shares an `edge` network with the gateway only. The services, Postgres and Redis are on a `backend` network with no published ports, because Docker's port publishing bypasses `ufw`. A one-off `migrate` container runs before auth-service on every `up`. Redis uses append-only persistence, so queued emails survive a restart.
+- The planned setup: API at `api.auth.example.com`, frontend on Vercel at `auth.example.com`. Both are under one registrable domain, so the `SameSite=Lax` cookies work without changes. README has a "Deploying" section.
+
 ---
 
 ## Lessons
 Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.md](LEARNINGS.md).
 
 ## Next up
-- Microservices branch: decide how long email jobs stay in Redis and how often they retry (`EMAIL_JOB_OPTIONS`); fix the Resend key/domain pair; consider per-service internal keys; Dockerfiles if the trial continues.
+- Microservices branch: decide how long email jobs stay in Redis and how often they retry (`EMAIL_JOB_OPTIONS`); fix the Resend key/domain pair; consider per-service internal keys; first real deploy with `deploy/compose.yml`, then backups (`pg_dump` from cron) and log shipping.
 - Frontend: password field on the verify page, handle the 403 on sign-in, a single in-flight refresh with a retry on the "refreshed by another request" 401, and a sessions page.
 - Start Redis (`pnpm db:up`) and set `REDIS_URL` and `TRUST_PROXY` in each environment.
 - Consider an absolute session lifetime (sessions currently last as long as they keep refreshing).

@@ -161,6 +161,84 @@ It reads the job from Redis, so it only finds jobs the queue still keeps (see `E
 
 ---
 
+## Deploying
+
+The API runs on one VPS with Docker Compose, and the frontend runs on Vercel. Both use hostnames under the same domain, for example:
+
+```
+browser ──https──> auth.example.com       Vercel (frontend)
+        ──https──> api.auth.example.com   VPS: nginx → gateway → auth / media / notification
+                                               Postgres and Redis, reachable only from the services
+```
+
+The cookies are `SameSite=Lax`, so **both hostnames must share a registrable domain** (`example.com`). A `*.vercel.app` frontend can't sign in to an `example.com` API.
+
+Everything is in [`deploy/`](deploy): `compose.yml`, `nginx/api.conf.template` and `.env.sample`. One `Dockerfile` at the root builds an image that every service runs from. Only nginx publishes ports (80 and 443). Docker writes its own firewall rules and ignores `ufw`, so a published database port would be open to the internet even with a firewall. nginx is on its own network with the gateway, so it can't reach the services or the databases. A `certbot` container renews the Let's Encrypt certificate, and nginx reloads every 6 hours to pick it up.
+
+### 1. DNS and accounts
+
+- An `A` record (and `AAAA` for IPv6) for `api.auth.example.com` pointing at the VPS.
+- Resend: verify the domain in `EMAIL_FROM` (SPF and DKIM records).
+- The frontend's record comes later, from Vercel.
+
+### 2. Prepare the server (Ubuntu/Debian)
+
+```bash
+# docker engine and the compose plugin, from Docker's apt repository: https://docs.docker.com/engine/install/ubuntu/
+sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443 && sudo ufw enable
+
+git clone <repo-url> authentication && cd authentication
+git checkout microservice-architecture
+cp deploy/.env.sample deploy/.env
+chmod 600 deploy/.env
+```
+
+Fill in `deploy/.env`. Generate each secret with `openssl rand -hex 32`, using a different one for each. Service URLs, `REDIS_URL`, `NODE_ENV=production` and `TRUST_PROXY=1` are set in `compose.yml`.
+
+### 3. Get the first certificate (once)
+
+nginx won't start without a certificate, so the first one is issued with certbot's own temporary server on port 80, before nginx runs. The DNS record from step 1 must already point at the server.
+
+```bash
+cd deploy
+docker compose run --rm -p 80:80 --entrypoint certbot certbot certonly --standalone \
+  -d api.auth.example.com --email you@example.com --agree-tos --no-eff-email
+```
+
+After this, the `certbot` container renews it through nginx on its own.
+
+### 4. Start it
+
+```bash
+docker compose up -d --build
+docker compose ps                  # migrate shows "exited (0)"; everything else is running
+docker compose logs nginx          # no "cannot load certificate" errors
+curl https://api.auth.example.com/ # {"message":"Gateway is running"}
+docker compose run --rm --entrypoint certbot certbot renew --dry-run --webroot -w /var/www/certbot   # renewal works through nginx
+```
+
+On every start, `migrate` applies any new migrations before auth-service starts.
+
+### Updating
+
+```bash
+git pull && cd deploy && docker compose up -d --build
+```
+
+### Operating it
+
+```bash
+docker compose logs -f auth-service
+docker compose exec postgres psql -U postgres auth_microservices
+docker compose exec postgres pg_dump -U postgres auth_microservices > backup-$(date +%F).sql   # run from cron, keep copies off the server
+```
+
+### Frontend on Vercel
+
+Add `auth.example.com` as the project's domain in Vercel and create the `CNAME` record it gives you. The frontend calls `https://api.auth.example.com` directly with `credentials: 'include'`. Don't proxy the API through Vercel rewrites: Vercel's servers would become the client address, so every user would share one rate limit. `FRONTEND_DOMAIN` in `deploy/.env` must match the Vercel domain, because it is the only CORS origin and the base of every email link.
+
+---
+
 ## Scripts
 
 Run from the repo root.
@@ -205,6 +283,8 @@ services/
 ├── notification-service/src/   # worker.ts (queue consumer), mail.ts (templates + Resend)
 └── media-service/src/          # routes, controller, auth-client.ts, middlewares (authenticate, upload-multer), imagekit.ts
 docs/API.md                     # API reference
+Dockerfile                      # one image for every service (build stage also runs migrations)
+deploy/                         # production compose file, nginx config, .env.sample
 ```
 
 Each package has its own `tests/`.

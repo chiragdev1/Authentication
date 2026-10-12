@@ -54,6 +54,7 @@ For anything the mocks hide (queue, real emails, ImageKit, service-to-service ca
 - `services/notification-service/src/`: `worker.ts` (validates jobs against `emailJobModel`, dispatches), `mail.ts` (Resend), `templates/components.ts` (table-based layout, button, callout, steps, details; inline styles, `escapeHtml` every dynamic value), `templates/emails.ts` (one function per email returning subject, html and text). `pnpm --filter @authentication/notification-service preview` writes them to `preview/` (gitignored).
 - `services/media-service/src/`: `routes.ts`, `controller.ts` (`AvatarController`), `middlewares/` (authenticate through auth-service, upload-multer, rate-limit), `utils/auth-client.ts`, `utils/imagekit.ts`
 - Each package has its own `tests/`
+- `Dockerfile` (root) + `deploy/`: production on one VPS. `deploy/compose.yml` runs every service from the one image. nginx (`deploy/nginx/api.conf.template`, certificates from the `certbot` container) is the only container with published ports; it must overwrite `X-Forwarded-For` with `$remote_addr`, never append to it, because the services trust it (`TRUST_PROXY=1`). The services use `SERVICE_HOST=0.0.0.0` on an unpublished `backend` network in place of loopback. Secrets live in `deploy/.env` (gitignored, from `.env.sample`); infrastructure values are set in `compose.yml`. Never publish Postgres or Redis ports there: Docker bypasses `ufw`. A new service or package needs its `package.json` and `dist` copied in the Dockerfile's runtime stage.
 
 ## Conventions
 
