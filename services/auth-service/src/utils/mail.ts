@@ -9,7 +9,13 @@ import { env } from '../config/env.js'
 // how long BullMQ keeps a job and how often it retries. the job carries the email address and, for verification and reset
 // mails, a live token in the link, all readable by anything with access to Redis
 const EMAIL_JOB_OPTIONS: JobsOptions = {
-  // TODO(human)
+  // 15s, 30s, 1m, 2m between tries: the last one is about 4 minutes in, well inside the 15 minute life of the token in the link
+  attempts: 5,
+  backoff: {type: 'exponential', delay: 15_000},
+  // kept no longer than the link is valid, so dev:last-link and debugging still work. removal by age is lazy (it runs when
+  // another job finishes), which is only safe because the database, not Redis, decides when a token expires
+  removeOnComplete: {age: 15 * 60},
+  removeOnFail: {age: 15 * 60},
 }
 
 let emailQueue: Queue<EmailJob> | null = null
