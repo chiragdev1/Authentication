@@ -187,11 +187,14 @@ Everything is in [`deploy/`](deploy): `compose.yml`, `nginx/api.conf.template` a
 # docker engine and the compose plugin, from Docker's apt repository: https://docs.docker.com/engine/install/ubuntu/
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443 && sudo ufw enable
 
-git clone <repo-url> authentication && cd authentication
-git checkout microservice-architecture
+# only this branch: main (the monolith) is never fetched, and `git pull` stays on this branch
+git clone --branch microservice-architecture --single-branch <repo-url> authentication-microservices
+cd authentication-microservices
 cp deploy/.env.sample deploy/.env
 chmod 600 deploy/.env
 ```
+
+Run every `docker compose` command from `deploy/`. The `docker-compose.yml` at the repo root (`pnpm db:up`) is for local development. It publishes Postgres, with the password `postgres`, and Redis on every interface, which on a server puts them on the internet.
 
 Fill in `deploy/.env`. Generate each secret with `openssl rand -hex 32`, using a different one for each. Service URLs, `REDIS_URL`, `NODE_ENV=production` and `TRUST_PROXY=1` are set in `compose.yml`.
 
