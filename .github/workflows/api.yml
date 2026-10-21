@@ -1,0 +1,83 @@
+name: API
+
+on:
+  pull_request:
+    paths: &api-paths
+      - src/**
+      - drizzle/**
+      - Dockerfile
+      - .dockerignore
+      - package.json
+      - pnpm-lock.yaml
+      - tsconfig.json
+      - deploy/compose.yml
+      - deploy/ckauth.caddy
+      - deploy/deploy.sh
+      - deploy/backup.sh
+      - .github/workflows/api.yml
+      - .github/workflows/deploy.yml
+  push:
+    branches: [main]
+    paths: *api-paths
+  # redeploy or roll back by hand from the Actions tab
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing image tag (full git sha) to deploy; empty = build this commit
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: ${{ !inputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  image:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/chiragdev1/ckauth-api:${{ github.sha }}
+            ghcr.io/chiragdev1/ckauth-api:latest
+          cache-from: type=gha,scope=ckauth-api
+          cache-to: type=gha,mode=max,scope=ckauth-api
+
+  deploy:
+    needs: image
+    # after a main build, or alone when a tag was given by hand
+    if: ${{ always() && (needs.image.result == 'success' || (inputs.tag && needs.image.result == 'skipped')) }}
+    uses: ./.github/workflows/deploy.yml
+    permissions:
+      contents: read
+      packages: read
+    secrets: inherit
+    with:
+      service: api
+      tag: ${{ inputs.tag || github.sha }}
+      smoke-path: /api/

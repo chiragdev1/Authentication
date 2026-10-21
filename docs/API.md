@@ -2,7 +2,8 @@
 
 Everything a client needs in order to use the Authentication API.
 
-- **Base URL (local):** `http://localhost:8080`
+- **Base URL (production):** `https://ckauth.chiragdev.com/api`. The proxy strips `/api`, so `POST https://ckauth.chiragdev.com/api/auth/sign-in` reaches `POST /auth/sign-in`.
+- **Base URL (local):** `http://localhost:8080`, or `http://localhost:3000/api` through the frontend's dev proxy.
 - **All endpoints** are under `/auth`.
 - **Request bodies** are JSON (`Content-Type: application/json`), except avatar upload, which is `multipart/form-data`.
 
@@ -60,7 +61,7 @@ What this means for a browser client:
 
 - Send cookies with every request: `fetch(url, { credentials: 'include' })`, or `axios` with `withCredentials: true`.
 - When a protected endpoint returns **`401`**, call [`POST /auth/refresh`](#post-authrefresh) once, then retry the original request. If refresh also fails, send the user to sign in.
-- **In production, the frontend and API must be on the same site**, e.g. `app.example.com` and `api.example.com`. The cookies are `SameSite=Lax`, so browsers won't send them from a different site. Locally, `localhost:3000` → `localhost:8080` works, because ports don't count as different sites.
+- **In production, the frontend and API must be on the same site.** The cookies are `SameSite=Lax`, so browsers won't send them from a different site. CKAuth uses one origin (`ckauth.chiragdev.com` + `/api`), so no CORS is involved. Locally, `localhost:3000` → `localhost:8080` works, because ports don't count as different sites.
 - **"Signed out" takes effect gradually.** When a session is ended (logout, password reset or change), its refresh token stops working immediately. An access token that was already issued keeps working until it expires (`ACCESS_TOKEN_EXPIRY`, e.g. up to 15 min).
 
 Endpoints marked **🔒 Auth required** need a valid `access_token` cookie, and the user's email must be verified.
@@ -84,9 +85,37 @@ Invalid input returns **`400`** with every problem listed in the message, as `fi
 | `401` | Not signed in, the session has expired, or the credentials are wrong. |
 | `403` | Signed in correctly, but the email isn't verified yet. |
 | `404` | The link or token is invalid or has expired. |
+| `429` | Too many attempts. See [Rate limits](#rate-limits). |
 | `500` | Server error. Usually `Internal Server Error`, sometimes a more specific message (e.g. `Could not save refresh token in db`). Safe to retry. |
 
 > **Known issue:** a JSON body that is malformed or larger than 50 KB currently returns `500` instead of `400`/`413`.
+
+### Rate limits
+
+Endpoints that check a password, send an email or use a single-use token are rate limited. Over the limit, the API returns **`429`**:
+
+```json
+{ "success": false, "message": "Too many requests, please try again later" }
+```
+
+Every response from a limited endpoint carries the standard `RateLimit-Policy` and `RateLimit` headers (IETF draft 8). They say how many requests are left and when the window resets, so a UI can show "try again in N minutes".
+
+| Endpoint | Limit | Counted per |
+|---|---|---|
+| `POST /auth/sign-in` | 100 per 15 min | IP address |
+| `POST /auth/sign-in` | 5 **failed** attempts per 15 min | Email address. Successful sign-ins don't count; any failure does (`401` wrong password, `403` unverified). |
+| `POST /auth/sign-up` | 10 per hour | IP address |
+| `POST /auth/forgot-password` | 10 per hour | IP address |
+| `POST /auth/forgot-password` | 3 per hour | Email address |
+| `POST /auth/verify-email/:token` | 20 per 15 min | IP address |
+| `POST /auth/reset-password/:token` | 20 per 15 min | IP address |
+| `POST /auth/refresh` | 60 per minute | IP address |
+| `POST /auth/change-password` | 5 per 15 min | Signed-in user |
+| `POST /auth/upload-avatar` | 10 per hour | Signed-in user |
+
+- **The per-email limits apply whether or not the account exists,** with the same `429`, so they can't be used to find out who's registered.
+- **While an email is limited, even the right password gets `429`.** Show "too many attempts, try again later" rather than "wrong password".
+- IPv6 addresses are grouped by `/56` subnet, because one user usually controls a whole block of them.
 
 ---
 

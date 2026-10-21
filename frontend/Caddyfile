@@ -1,0 +1,18 @@
+# internal static server for the SPA, as a non-root user on :8080; TLS and security headers are handled by the shared edge proxy
+{
+	admin off
+}
+
+:8080 {
+	root * /srv
+
+	# hashed build assets never change, so browsers can keep them forever
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	# index.html must always be revalidated, or users keep loading an old deploy
+	header ?Cache-Control "no-cache"
+
+	# client-side routes like /verify-email fall back to the SPA
+	try_files {path} /index.html
+	file_server
+}

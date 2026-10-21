@@ -1,0 +1,42 @@
+# shared reverse proxy for every site on this vps, lives at /opt/edge
+# it owns ports 80/443 and gets certificates for each domain in sites/*.caddy
+# projects join the `edge` network and drop a site file in sites/, then reload:
+#   docker compose -f /opt/edge/compose.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+name: edge
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # root inside the container, but with every capability removed except binding ports 80/443
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    # .env only fills ${...} in this file; the Caddyfile reads ACME_EMAIL from the container's environment
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-admin@chiragdev.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # directory mounts (not single files) so new or replaced site files show up without a restart
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
+      # certificates live here; losing them means re-issuing, which Let's Encrypt rate-limits
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+    # shared by every site, so it gets a cap of its own rather than borrowing from any one project
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 256M}
+
+networks:
+  edge:
+    name: edge
+
+volumes:
+  caddy_data:
+  caddy_config:

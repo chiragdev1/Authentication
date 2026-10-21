@@ -1,9 +1,12 @@
-# Authentication Service
+# CKAuth
 
 A production-minded authentication API built with **Express 5**, **TypeScript** and **PostgreSQL**.
 It handles the full account lifecycle: sign-up with email verification, cookie-based sessions with refresh tokens, password reset and change, and profile avatars stored on ImageKit.
 
 > **Building a frontend against this API?** Go straight to the **[API reference](docs/API.md)**.
+> **Deploying?** See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (Hostinger VPS, Docker Compose, GitHub Actions).
+
+The repo also contains the **CKAuth web app** in [`frontend/`](frontend/) (React + Vite + Tailwind), which implements every flow in the API.
 
 ---
 
@@ -19,6 +22,8 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
   - Responses never reveal whether an email is registered.
   - Sign-in requires a verified email.
   - Database updates are safe when requests arrive at the same time.
+  - Rate limits per IP, per email and per user on every endpoint that checks a password, sends an email or uses a single-use token. They're shared through Redis.
+  - Password hashing runs off the main thread, so a burst of sign-ins can't stall everyone else.
 
 ## Tech stack
 
@@ -27,9 +32,12 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
 | Runtime | Node.js, TypeScript, Express 5 |
 | Database | PostgreSQL 17 (Docker), Drizzle ORM |
 | Validation | Zod |
-| Auth | JSON Web Tokens (`jsonwebtoken`), `bcryptjs` |
+| Auth | JSON Web Tokens (`jsonwebtoken`), native `bcrypt` (hashes off the main thread) |
+| Rate limiting | `express-rate-limit` with a Redis store (`rate-limit-redis`) |
 | Email | Resend |
 | File uploads | Multer (in-memory), ImageKit |
+| Frontend | React 19, Vite, Tailwind CSS 4, React Router |
+| Hosting | Docker Compose on a Hostinger VPS behind a shared Caddy edge proxy (HTTPS), GitHub Actions → GHCR |
 
 ---
 
@@ -39,7 +47,7 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
 
 - **Node.js 20+** (developed on Node 24)
 - **pnpm**: run `corepack enable` to use the version pinned in `package.json`
-- **Docker**, for the local PostgreSQL database
+- **Docker**, for the local PostgreSQL and Redis
 - A **Resend** API key (for emails) and an **ImageKit** private key (for avatars)
 
 ### 1. Install dependencies
@@ -65,11 +73,12 @@ Then open `.env` and fill in the values:
 | `REFRESH_TOKEN_SECRET_KEY` | Yes | Secret used to sign refresh tokens. **Must be different** from the access token secret. |
 | `ACCESS_TOKEN_EXPIRY` | Yes | Access token lifetime, e.g. `15m`. |
 | `REFRESH_TOKEN_EXPIRY` | Yes | Refresh token lifetime, e.g. `1d`. |
-| `APP_NAME` | No | Name shown in emails. Default: `DSADEN`. |
+| `APP_NAME` | No | Product name shown in emails. Default: `CKAuth`. |
 | `RESEND_API_KEY` | Yes | Resend API key (starts with `re_`). **The server won't start without it.** |
-| `EMAIL_FROM` | Yes | Sender address on a domain verified in Resend, e.g. `"YourApp <no-reply@mail.yourdomain.com>"`. |
+| `EMAIL_FROM` | Yes | Sender address on a domain verified in Resend, e.g. `"CKAuth <no-reply@yourdomain.com>"`. **The server won't start without it.** No domain is hard-coded, so changing mail domains is a config change. |
 | `FRONTEND_URL` | Yes | Base URL of your frontend. Links in emails point here. Default: `http://localhost:3000`. |
 | `IMAGEKIT_PRIVATE_KEY` | For avatars | ImageKit private API key. The server starts without it; only avatar uploads fail. |
+| `REDIS_URL` | No | Redis for rate-limit counts, e.g. `redis://localhost:6379`. Without it, limits are counted in the process's memory (fine for one local process). |
 
 Generate strong JWT secrets with:
 
@@ -80,7 +89,7 @@ node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ### 3. Start the database and run migrations
 
 ```bash
-pnpm db:up        # starts PostgreSQL in Docker
+pnpm db:up        # starts PostgreSQL and Redis in Docker
 pnpm db:migrate   # creates the tables
 ```
 
@@ -97,6 +106,16 @@ curl http://localhost:8080/
 # {"message":"Express Application is running"}
 ```
 
+### 5. Run the frontend
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+Open `http://localhost:3000`. The Vite dev server proxies `/api/*` to the API on port 8080 (stripping `/api`), exactly like Caddy does in production. Keep `FRONTEND_URL=http://localhost:3000` in `.env` so email links open this app.
+
 ---
 
 ## Scripts
@@ -106,9 +125,10 @@ curl http://localhost:8080/
 | `pnpm dev` | Compiles in watch mode and restarts the server on every change. |
 | `pnpm build` | Compiles TypeScript to `dist/`. Also the project's type check. |
 | `pnpm start` | Runs the compiled server from `dist/`. |
-| `pnpm db:up` / `pnpm db:down` | Starts / stops the PostgreSQL container. |
+| `pnpm db:up` / `pnpm db:down` | Starts / stops the PostgreSQL and Redis containers. |
 | `pnpm db:generate` | Creates a new migration after you change `src/db/schema.ts`. |
 | `pnpm db:migrate` | Applies pending migrations to the database. |
+| `pnpm db:migrate:prod` | Applies migrations with Drizzle's runtime migrator (`dist/db/migrate.js`); used by deploys. |
 | `pnpm drizzle:studio` | Opens Drizzle Studio to browse the database. |
 
 **Changing the database schema:** edit `src/db/schema.ts` → `pnpm db:generate` → review the SQL in `drizzle/` → `pnpm db:migrate` → commit the schema and the migration together.
@@ -133,6 +153,7 @@ src/
 │       └── upload-multer.ts    # Avatar upload parsing and validation
 ├── db/
 │   ├── index.ts                # Drizzle database client
+│   ├── migrate.ts              # Runtime migrator used in production
 │   └── schema.ts               # Table definitions
 └── utils/
     ├── api-error.ts            # ApiError: errors with an HTTP status
@@ -141,6 +162,12 @@ src/
     └── imagekit.ts             # ImageKit upload and delete
 drizzle/                        # Generated SQL migrations
 docs/API.md                     # API reference
+docs/DEPLOYMENT.md              # Production setup, deploys, rollbacks, backups
+Dockerfile                      # API image
+frontend/                       # React app; frontend/Dockerfile + Caddyfile build the web image (internal static server)
+deploy/                         # CKAuth compose stack, deploy script, site config, env templates, VPS setup
+deploy/edge/                    # Shared Caddy proxy for every site on the VPS (owns 80/443)
+.github/workflows/              # api.yml and web.yml build and deploy independently via deploy.yml
 ```
 
 ---
@@ -161,7 +188,7 @@ docs/API.md                     # API reference
 Cookies are `httpOnly` and `SameSite=Lax`, and `Secure` in production. Frontend code never reads or stores tokens itself.
 
 Two consequences:
-- **Deploy the frontend and API on the same site** (e.g. `app.example.com` and `api.example.com`). Browsers don't send `Lax` cookies across different sites.
+- **Deploy the frontend and API on the same site.** Browsers don't send `Lax` cookies across different sites. Production uses one origin: `ckauth.chiragdev.com` serves the app and `ckauth.chiragdev.com/api/*` is proxied to the API.
 - **Ending a session takes effect gradually.** The refresh token is revoked immediately, but an access token that was already issued stays valid until it expires (`ACCESS_TOKEN_EXPIRY`).
 
 ## Security notes
@@ -174,8 +201,7 @@ Two consequences:
 
 These are planned but not done yet:
 
-- **No rate limiting.** Put the API behind a proxy or firewall that limits requests until this is added.
-- **No CORS configuration.** Browsers can only call the API from the same origin, or through a proxy such as the frontend dev server's proxy. A frontend on another origin needs CORS added first.
+- **No CORS configuration.** Not needed for the bundled frontend, which is served from the same origin. A frontend on another origin would need CORS added first.
 - **Malformed or oversized (over 50 KB) JSON bodies return `500`** instead of `400`/`413`.
 - **No automated tests yet.**
 
@@ -184,5 +210,7 @@ These are planned but not done yet:
 ## Further reading
 
 - **[docs/API.md](docs/API.md):** every endpoint, with requests, responses and errors.
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md):** production setup, deploying, rolling back and backups.
+- **[docs/VPS-ACCESS.md](docs/VPS-ACCESS.md):** first-time SSH and GitHub setup for the VPS.
 - **[DEVLOG.md](DEVLOG.md):** how the project was built, step by step.
 - **[LEARNINGS.md](LEARNINGS.md):** mistakes made along the way, and the rules learned from them.

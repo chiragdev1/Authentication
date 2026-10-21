@@ -1,7 +1,7 @@
 {
-  "name": "Authentication",
+  "name": "ckauth-api",
   "version": "1.0.0",
-  "description": "",
+  "description": "CKAuth authentication API",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -13,6 +13,7 @@
     "db:down": "docker compose down",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:migrate:prod": "node dist/db/migrate.js",
     "drizzle:studio": "npx drizzle-kit studio"
   },
   "keywords": [],
@@ -20,6 +21,7 @@
   "license": "ISC",
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
@@ -33,14 +35,17 @@
   },
   "dependencies": {
     "@imagekit/nodejs": "^7.12.1",
-    "bcryptjs": "^3.0.3",
+    "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^18.0.4",
     "drizzle-orm": "1.0.0-rc.4",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.4.0",
     "pg": "^8.23.0",
+    "rate-limit-redis": "^6.0.1",
+    "redis": "^6.3.0",
     "resend": "^6.31.0",
     "zod": "^4.6.5"
   }

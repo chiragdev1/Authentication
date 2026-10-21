@@ -63,6 +63,31 @@ For the timeline, see [DEVLOG.md](DEVLOG.md).
 - **Migration generated but not applied.** The code expected columns the database didn't have yet. → `pnpm db:migrate` is part of "done".
 - **A typo in a route handler reached a commit** (`36e8342`).
   **Rule:** run `pnpm build` (the type check) before every commit.
+- **The backend `tsconfig` compiled the frontend.** With no `include`, `tsc` picked up `frontend/**`. → Added `"include": ["src"]`.
+  **Rule:** a package with its own `tsconfig` inside another package needs the outer one scoped explicitly.
+- **The frontend built locally but failed in CI.** `vite.config.ts` uses `process.env`, but only the root (API) package depended on `@types/node`; TypeScript found it in `../node_modules` on the laptop, while CI installs `frontend/` alone. → Added `@types/node` to `frontend/package.json`.
+  **Rule:** a nested package must declare every dependency itself; check with a clean `git archive` copy, installing only that package, as CI does.
+- **The first VPS script would have locked out the admin.** It turned off root SSH, but the only remaining user (`deploy`) had no `sudo`. → A separate `chirag` admin user with sudo; `deploy` is CI-only.
+  **Rule:** before turning off a way in, make sure another way in with the same powers exists, and test it in a new terminal.
+- **SSH password logins stayed on after hardening.** The script wrote `PasswordAuthentication no` to `sshd_config.d/99-hardening.conf`, but `sshd` keeps the *first* value it reads, and Hostinger's `50-cloud-init.conf` loads earlier with `yes`. The server kept accepting passwords for `chirag`; it only came to light when a failed key login fell back to a password prompt. → Renamed to `00-hardening.conf`, and the script now checks `sshd -T` (the settings in force) and fails if they're wrong.
+  **Rule:** for `sshd` (unlike most config systems) the first value wins, so drop-ins that must win go first (`00-`). Verify the effective config (`sshd -T`, or the login methods `ssh -v` reports), not the file you wrote.
+- **Piping data into `ssh host "sudo …"` can't work.** Without a terminal `sudo` can't prompt; with `-t`, it reads the piped data as the password. → Put the data in the command string (`ssh -t vps "echo '$(cat key.pub)' | sudo tee -a …"`), leaving stdin for the prompt.
+  **Rule:** a remote `sudo` that may prompt gets `ssh -t` and nothing piped on stdin.
+- **The edge proxy ignored `ACME_EMAIL`.** The docs said to put it in `/opt/edge/.env`, but Compose uses `.env` only to fill `${...}` in `compose.yml`, and nothing there passed it to the container, so Caddy used its default address. → `environment: ACME_EMAIL: ${ACME_EMAIL:-…}` in `deploy/edge/compose.yml`.
+  **Rule:** a value in a Compose `.env` reaches a container only through `environment:` or `env_file:`; check with `docker compose exec <service> env`.
+
+## Performance
+
+- **Password hashing on the main thread capped the whole API.** `bcryptjs` is pure JavaScript, so each ~60 ms hash ran on Node's only JavaScript thread: sign-in topped out at 17/s and a burst of sign-ins delayed every other request. → Native `bcrypt`, on libuv's thread pool.
+  **Rule:** CPU-heavy work (hashing, image processing, compression) must run off the main thread: a native or async thread-pool implementation, or a worker.
+- **"Zero errors" hid a collapse.** At 2,000 people online every request still succeeded, with a p95 of 12 s: demand outran capacity and the queue grew. → Judge load tests on p95/p99 latency, not on error rate.
+  **Rule:** a load test passes on latency targets, not on success counts.
+- **A smaller thread pool made things worse.** Capping `UV_THREADPOOL_SIZE` at 1, to keep bcrypt to one core, slowed real users (p50 1.56 s vs 0.73 s), because Postgres reconnects also look up hostnames on that pool. → Kept the default of 4.
+  **Rule:** measure a tuning change before keeping it. The thread pool is shared by DNS, files and crypto.
+- **A load test with fake emails missed both the cost and a leak.** Bots using made-up emails never reached bcrypt, because unknown emails return early. That made the attack look cheap, and it exposed a timing difference (16 ms vs 60 ms). → Rerun against real accounts.
+  **Rule:** attack simulations must use realistic inputs (real usernames in credential stuffing). Response *time* must not depend on whether an account exists.
+- **Default keep-alive timeouts would have caused random 502s.** Node closes idle sockets after 5 s, while Caddy reuses upstream sockets for much longer, so a POST could land on a socket Node had just closed. → `keepAliveTimeout` 125 s in Node, upstream `keepalive 60s` in Caddy.
+  **Rule:** behind a proxy, the app's idle timeout must be longer than the proxy's.
 
 ## Process
 

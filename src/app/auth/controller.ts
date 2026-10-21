@@ -1,5 +1,6 @@
 import type {Request, Response} from 'express'
-import bcrypt from 'bcryptjs'
+// native bcrypt hashes on libuv's thread pool, so password checks don't block other requests
+import bcrypt from 'bcrypt'
 import crypto from 'crypto'
 
 import { changePasswordPayloadModel, forgotPasswordPayloadModel, resetPasswordPayloadModel, signinPayloadModel, signupPayloadModel, verifyEmailPayloadModel } from './models.js';
@@ -12,6 +13,11 @@ import { ApiResponse } from '../../utils/api-response.js';
 import { cookieOptions, getFrontendUrl } from './utils/constants.js';
 import { sendAccountExistsMail, sendEmailVerificationMail, sendResetPasswordMail, sendWelcomeMail } from '../../utils/mail.js';
 import { deleteImage, uploadImage } from '../../utils/imagekit.js';
+
+// one cost for every hash, so the dummy compare below takes exactly as long as a real one
+const PASSWORD_HASH_ROUNDS = 10
+// hash of a random value nobody knows, made once at startup; compared against when an email has no account
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), PASSWORD_HASH_ROUNDS)
 
 export class AuthController {
 
@@ -32,7 +38,7 @@ export class AuthController {
     const genericMessage = 'Check your email to finish creating your account'
 
     // hash the password before checking the email, so both cases take about the same time
-    const hash = await bcrypt.hash(password, 10)
+    const hash = await bcrypt.hash(password, PASSWORD_HASH_ROUNDS)
 
     const {token: emailVerificationToken, hashedToken: hashedEmailVerificationToken} = await createTempToken()
     const emailVerificationTokenExpiry = new Date(Date.now() + (15*60*1000)) // 15 minutes from now
@@ -125,8 +131,9 @@ export class AuthController {
     const [userInDb] = await db.select().from(usersTable).where(eq(usersTable.email, email))
     // console.log('userInDb', userInDb)
 
-    // throw error if user not found
+    // still run a bcrypt compare when there is no account, otherwise the faster response would reveal that the email isn't registered
     if(!userInDb || !userInDb.password) {
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH)
       throw ApiError.unauthorized('Invalid email or password')
     }
 
@@ -387,7 +394,7 @@ export class AuthController {
     }
 
     // hash the new password
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10)
+    const hashedNewPassword = await bcrypt.hash(newPassword, PASSWORD_HASH_ROUNDS)
 
     // if valid, update the password, remove the reset token fields, and clear the refreshToken so existing sessions are signed out
     const [result] = await db.update(usersTable).set({password: hashedNewPassword, resetPasswordToken: null, resetPasswordTokenExpiry: null, refreshToken: null}).where(eq(usersTable.id, userInDb.id)).returning({id: usersTable.id})
@@ -429,7 +436,7 @@ export class AuthController {
     }
 
     // hash the newPassword
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10)
+    const hashedNewPassword = await bcrypt.hash(newPassword, PASSWORD_HASH_ROUNDS)
 
     // rotate the refreshToken so sessions on other devices are signed out, while this one stays signed in
     const accessToken = generateAccessToken({userId: userInDb.id})

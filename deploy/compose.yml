@@ -1,0 +1,138 @@
+# ckauth stack, lives at /opt/ckauth on the vps next to .env and api.env
+# images are built by github actions; API_TAG and WEB_TAG are git shas, so api and web deploy (and roll back) independently
+# nothing here publishes a port: the shared edge proxy (/opt/edge) reaches api and web over the `edge` network
+# every service has a memory cap (ckauth can never use more than ~1.4 GB) and a cpu cap; the api's 1.5 vcpus is the one that
+# matters, so even a password-guessing flood leaves at least half a vcpu for other sites (see docs/DEPLOYMENT.md, "Resource budget")
+name: ckauth
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ckauth
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ckauth
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    # the entrypoint starts as root only to fix data-dir ownership, then drops to the postgres user
+    security_opt: [no-new-privileges:true]
+    # only on the private network, so other projects on the edge network can't reach it
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ckauth -d ckauth"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 768M}
+
+  # rate limit counters, shared by every api process; they expire on their own, so nothing is persisted
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # no snapshots, no append-only file, and a hard memory cap; when full, evict the keys closest to expiring
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "48mb", "--maxmemory-policy", "volatile-ttl"]
+    # the image's own redis user, so the entrypoint never needs root to drop privileges
+    user: "999:999"
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/data]
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 64M}
+
+  # one-off, run by the api deploy before the new api starts: docker compose run --rm migrate
+  # the profile keeps a plain `up` (e.g. after a reboot) from running it
+  migrate:
+    image: ghcr.io/chiragdev1/ckauth-api:${API_TAG:?set API_TAG in .env}
+    profiles: [tools]
+    command: ["node", "dist/db/migrate.js"]
+    # least privilege: no root tricks (setuid), no linux capabilities, read-only filesystem
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    environment:
+      DATABASE_URL: postgres://ckauth:${POSTGRES_PASSWORD}@db:5432/ckauth
+    networks:
+      - internal
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: ghcr.io/chiragdev1/ckauth-api:${API_TAG}
+    restart: unless-stopped
+    env_file: api.env
+    # least privilege: no root tricks (setuid), no linux capabilities, read-only filesystem
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      DATABASE_URL: postgres://ckauth:${POSTGRES_PASSWORD}@db:5432/ckauth
+      FRONTEND_URL: https://${DOMAIN:?set DOMAIN in .env}
+      REDIS_URL: redis://redis:6379
+    networks:
+      internal:
+      edge:
+        # project-prefixed so it can't clash with another project's "api" on the shared network
+        aliases: [ckauth-api]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 1.5 of the 2 vcpus: password hashing can use both cores, but never all of the machine
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 512M}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  web:
+    image: ghcr.io/chiragdev1/ckauth-web:${WEB_TAG:?set WEB_TAG in .env}
+    restart: unless-stopped
+    # least privilege: no root tricks (setuid), no linux capabilities, read-only filesystem
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    # caddy wants somewhere to write its runtime state, even as a plain file server
+    tmpfs: [/data, /config]
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 64M}
+    networks:
+      edge:
+        aliases: [ckauth-web]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  internal:
+  # created by /opt/edge/compose.yml, which must be running first
+  edge:
+    external: true
+
+volumes:
+  db_data:

@@ -1,0 +1,56 @@
+# reusable deploy job shared by api.yml and web.yml
+name: Deploy service
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      smoke-path:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    # one deploy at a time across both workflows, so api and web never race on the server
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # pinned host key: a server we don't recognise gets no credentials
+          echo "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          echo "VPS=${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" >> "$GITHUB_ENV"
+
+      - name: Upload stack files
+        run: scp deploy/compose.yml deploy/ckauth.caddy deploy/deploy.sh deploy/backup.sh "$VPS:/opt/ckauth/"
+
+      - name: Deploy ${{ inputs.service }}
+        env:
+          SERVICE: ${{ inputs.service }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          # the job's GITHUB_TOKEN can read this repo's private images and expires when the job ends
+          ssh "$VPS" "docker login ghcr.io -u ${{ github.actor }} --password-stdin" <<< "${{ secrets.GITHUB_TOKEN }}"
+          status=0
+          ssh "$VPS" bash /opt/ckauth/deploy.sh "$SERVICE" "$TAG" || status=$?
+          ssh "$VPS" docker logout ghcr.io
+          exit $status
+
+      - name: Smoke test
+        run: curl --fail --silent --show-error --retry 5 --retry-delay 3 "https://${{ vars.DOMAIN }}${{ inputs.smoke-path }}" > /dev/null
