@@ -106,6 +106,10 @@ Newest entries go at the bottom, under a dated heading.
 - Decided on one shared sending domain, `mail.chiragdev.com`, for every project on the VPS (Resend's free plan verifies one domain); receiving stays off.
 - Fixed the failing `Web / check` CI job: `frontend/` now depends on `@types/node` itself instead of borrowing the API package's copy.
 
+## 21 Oct 2026 · First production deploy
+- Merged to `main`: api, db and redis deployed and are healthy on the VPS.
+- **The web container failed its health check.** Caddy's binary has a file capability that `cap_drop: [ALL]` forbids, so it couldn't start (`operation not permitted`). The web image now removes the capability at build time, and its tmpfs folders belong to the non-root user. Both checked on the VPS under production restrictions before committing.
+
 ---
 
 ## Lessons

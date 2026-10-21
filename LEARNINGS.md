@@ -75,6 +75,8 @@ For the timeline, see [DEVLOG.md](DEVLOG.md).
   **Rule:** a remote `sudo` that may prompt gets `ssh -t` and nothing piped on stdin.
 - **The edge proxy ignored `ACME_EMAIL`.** The docs said to put it in `/opt/edge/.env`, but Compose uses `.env` only to fill `${...}` in `compose.yml`, and nothing there passed it to the container, so Caddy used its default address. → `environment: ACME_EMAIL: ${ACME_EMAIL:-…}` in `deploy/edge/compose.yml`.
   **Rule:** a value in a Compose `.env` reaches a container only through `environment:` or `env_file:`; check with `docker compose exec <service> env`.
+- **The web container never started in production.** The official `caddy` binary carries a `cap_net_bind_service` file capability; with `cap_drop: [ALL]` and `no-new-privileges` the kernel refuses to exec it, so the container looped on `exec /usr/bin/caddy: operation not permitted` and failed its health check on the first deploy. The tmpfs folders were also root-owned, so Caddy (user 65534) couldn't write its state. → `RUN setcap -r /usr/bin/caddy` in `frontend/Dockerfile` (`:8080` needs no capability) and `uid=65534,gid=65534` on the tmpfs mounts.
+  **Rule:** run an image once with its production `cap_drop`, `user` and `read_only` settings before the first deploy; `getcap` the entrypoint of any image you drop capabilities from.
 
 ## Performance
 
