@@ -22,7 +22,8 @@ export "$TAG_VAR=$TAG"
 docker compose pull "$SERVICE"
 
 if [ "$SERVICE" = api ]; then
-  docker compose up -d --wait db
+  # the api deploys with --no-deps below, so its own dependencies have to be started here
+  docker compose up -d --wait db redis
   # a failed migration stops here, while the old api is still serving
   docker compose run --rm migrate
 fi

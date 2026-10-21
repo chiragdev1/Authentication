@@ -24,6 +24,26 @@ services:
       timeout: 3s
       retries: 10
 
+  # rate limit counters, shared by every api process; they expire on their own, so nothing is persisted
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # no snapshots, no append-only file, and a hard memory cap; when full, evict the keys closest to expiring
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "48mb", "--maxmemory-policy", "volatile-ttl"]
+    # the image's own redis user, so the entrypoint never needs root to drop privileges
+    user: "999:999"
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/data]
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # one-off, run by the api deploy before the new api starts: docker compose run --rm migrate
   # the profile keeps a plain `up` (e.g. after a reboot) from running it
   migrate:
@@ -57,6 +77,7 @@ services:
       PORT: "8080"
       DATABASE_URL: postgres://ckauth:${POSTGRES_PASSWORD}@db:5432/ckauth
       FRONTEND_URL: https://${DOMAIN:?set DOMAIN in .env}
+      REDIS_URL: redis://redis:6379
     networks:
       internal:
       edge:
@@ -64,6 +85,8 @@ services:
         aliases: [ckauth-api]
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8080/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]

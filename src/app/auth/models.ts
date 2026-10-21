@@ -2,7 +2,7 @@ import {z} from 'zod'
 
 // normalize before validating so " John@Gmail.com " and "john@gmail.com" map to the same account
 // 254 is the max length of a valid email address (RFC 5321)
-const emailModel = z
+export const emailModel = z
   .string()
   .trim()
   .toLowerCase()
