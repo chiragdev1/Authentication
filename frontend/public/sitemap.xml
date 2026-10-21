@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- only the home page is meant for search; every other route is noindex (frontend/Caddyfile) -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://ckauth.chiragdev.com/</loc>
+  </url>
+</urlset>

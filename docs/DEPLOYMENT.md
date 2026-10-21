@@ -1,6 +1,6 @@
 # Deploying CKAuth
 
-This guide takes you from an empty Hostinger VPS to CKAuth running at **`https://ckauth.chiragdev.com`**, with every push to `main` deploying itself. It's written for someone doing this for the first time. Follow the steps in order, and don't skip the **✅ Check** at the end of each one. Each check catches its step's mistakes while they're still easy to fix.
+This guide takes you from an empty Hostinger VPS to CKAuth running at **`https://ckauth.chiragdev.com`**, with every push to `main` deploying itself. It's written for someone doing this for the first time. Follow the steps in order, and don't skip the **✅ Check** at the end of each one. Each check catches its step's mistakes while they're still easy to fix. Terms such as VPS, container, reverse proxy and DNS record are defined in the [glossary](GLOSSARY.md).
 
 **Time:** about 1–2 hours the first time, most of it waiting for DNS.
 
@@ -729,7 +729,7 @@ Measured on 2 dedicated cores, with the API capped like production. **Expect abo
 | Path | What it is |
 |---|---|
 | `Dockerfile` | Builds the API image (non-root, production dependencies only) |
-| `frontend/Dockerfile`, `frontend/Caddyfile` | Builds the web image: the React build served by Caddy on :8080 |
+| `frontend/Dockerfile`, `frontend/Caddyfile` | Builds the web image: the React build served by Caddy on :8080. `/` is the prerendered home page; the app routes get the `app.html` shell with `X-Robots-Tag: noindex`; anything else is a real 404 |
 | `deploy/compose.yml` | The CKAuth stack: `db`, `redis`, `migrate`, `api`, `web`, each with CPU/memory caps |
 | `deploy/ckauth.caddy` | Public routing and security headers for `ckauth.chiragdev.com` |
 | `deploy/deploy.sh` | Runs on the VPS during a deploy: `deploy.sh <api\|web> <sha>` |

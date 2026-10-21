@@ -1,124 +1,181 @@
 # Dev Log: CKAuth
 
-**Stack:** TypeScript · Express 5 · PostgreSQL 17 (Docker) · Drizzle ORM · Zod · JWT · bcrypt · Resend · Multer + ImageKit
+The project's history, oldest first. Each entry opens with a one-line summary (**In short**), then the details. Terms are explained the first time they appear; the rest are in the [glossary](docs/GLOSSARY.md). Mistakes and the rules learned from them live in [LEARNINGS.md](LEARNINGS.md).
 
-Newest entries go at the bottom, under a dated heading.
+**Stack:** TypeScript · Express 5 · PostgreSQL 17 (in Docker) · Drizzle ORM · Zod · JWT · bcrypt · Resend · Multer + ImageKit
+
+New entries go at the bottom, under a dated heading.
 
 ---
 
 ## 26–27 Sep 2026 · Foundations
-- Set up the repo: pnpm, a strict `tsconfig`, an Express app and an HTTP server on port 8080.
-- Added Postgres in Docker, Drizzle and the first `users` table: UUID id, names, `age`, a unique `email`, `email_verified`, and `password` + `salt`.
-- Built **sign-up** and **sign-in** with Zod validation. Passwords were first hashed with a hand-rolled HMAC-SHA256 plus salt, and an early version logged the raw password to the console.
+**In short:** the project skeleton, the first database table, and working sign-up and sign-in.
+
+- Set up the repo with pnpm (the package manager), a strict `tsconfig` (TypeScript's settings file, set to catch as many mistakes as possible), an Express app and an HTTP server on port 8080.
+- Ran PostgreSQL in Docker and created the first `users` table with Drizzle (the ORM, a library that maps database tables to code): a UUID id (a random, unguessable identifier), names, `age`, a unique `email`, `email_verified`, and `password` + `salt`.
+- Built **sign-up** and **sign-in**, with Zod checking the input. Two early mistakes, both fixed later (see LEARNINGS): passwords were hashed with a hand-rolled HMAC-SHA256 plus salt, which is far too fast to be safe, and one version printed the raw password to the console.
 
 ## 28 Sep 2026 · Sessions
-- Added **JWT access and refresh tokens** stored in httpOnly cookies, an `authenticateToken` middleware, and a `refresh_token` column.
-- Created `ApiError` and `ApiResponse` for consistent errors and responses.
+**In short:** users stay signed in through two tokens kept in cookies.
+
+- Added **JWT access and refresh tokens**: a short-lived token that proves who you are, and a longer-lived one that gets a new access token. Both are stored in `httpOnly` cookies, which page scripts can't read.
+- Added the `authenticateToken` middleware (a function Express runs before a route's handler) to check the session on protected routes, and a `refresh_token` column.
+- Created `ApiError` and `ApiResponse`, so every error and success response has the same shape.
 
 ## 30 Sep 2026 · First hardening pass
-- **Switched to bcrypt** and dropped the `salt` column.
-- Added a central error-handler middleware.
-- Sign-up now relies on `onConflictDoNothing` on email, which makes simultaneous duplicate sign-ups safe.
-- Cookie options and expiry now follow the JWT's expiry time.
+**In short:** proper password hashing, one place for errors, and safe duplicate sign-ups.
+
+- **Switched to bcrypt**, a deliberately slow password hash, and dropped the `salt` column (bcrypt stores its own salt).
+- Added one central error handler for the whole app.
+- Sign-up now inserts with `onConflictDoNothing` on the email's unique constraint (a database rule that no two rows share a value). If two sign-ups for the same email arrive at the same moment, a race condition, the database lets exactly one through.
+- Cookie lifetimes now match the token's own expiry time.
 
 ## 2–4 Oct 2026 · Email verification
-- Integrated Resend with HTML and plain-text templates.
-- Verification tokens are random 32 bytes, **stored only as a SHA-256 hash**, and expire after 15 minutes.
+**In short:** new accounts must confirm their email through a link.
+
+- Connected Resend for sending email, with HTML and plain-text versions of each message.
+- Verification tokens are 32 random bytes, **stored only as a SHA-256 hash**, and expire after 15 minutes. A database leak would not reveal working links.
 
 ## 7–8 Oct 2026 · Full account lifecycle
-- Added logout, refresh, `/me`, forgot/reset password and change password, plus welcome and reset emails.
-- **Refresh tokens are now stored hashed.** A password reset signs out all sessions; a password change signs out other devices.
-- Forgot-password gives the same response whether or not the account exists.
-- Email links now point to `FRONTEND_URL`. A `jwtid` claim makes every token unique.
-- Sign-in only resends the verification email if the last link has expired.
+**In short:** logout, refresh, password reset and password change, all built safely.
+
+- Added logout, refresh, `/me` (the signed-in user's profile), forgot/reset password and change password, plus welcome and reset emails.
+- **Refresh tokens are now stored hashed.** A password reset signs out every session; a password change signs out the user's other devices.
+- Forgot-password gives the same response whether or not the account exists, so nobody can use it to test which emails are registered.
+- Email links now point to `FRONTEND_URL`. A `jwtid` claim (a *claim* is a fact stored inside a JWT; this one is a unique ID) makes every token different, even when two are issued in the same second.
+- Sign-in only resends the verification email if the previous link has expired.
 
 ## 9 Oct 2026 · Avatars
-- `POST /auth/upload-avatar`: authenticate first, then Multer keeps the file in memory.
+**In short:** users can upload a profile picture, safely.
+
+- `POST /auth/upload-avatar` checks the session *before* reading the file, then Multer (Express's file-upload middleware) holds the file in memory.
   - Max 2 MB, one file only, JPEG/PNG/WebP.
-  - The **real file type is checked from its bytes**, so the client's claimed type isn't trusted.
-- Upload to ImageKit first, then lock the user's row and update it.
-  - The new file is deleted if saving to the database fails.
-  - The old avatar is deleted after the switch.
-  - No unused files are left behind, even with two uploads at once.
-- Filenames are random UUIDs with a `user:<id>` tag, so URLs don't expose user IDs.
-- Added `.env.sample` with placeholders and un-ignored it in git.
+  - The **real file type is read from the file's first bytes** ("magic bytes"), so a renamed file can't pass as an image.
+- The picture is uploaded to ImageKit (an image CDN) first, then the user's database row is locked (`SELECT … FOR UPDATE`, so other requests wait their turn) and updated.
+  - If saving to the database fails, the new file is deleted.
+  - The old picture is deleted after the switch.
+  - No orphaned files (uploads nothing points to any more) are left behind, even with two uploads at once.
+- Filenames are random UUIDs, tagged `user:<id>` in ImageKit, so public image URLs don't reveal user IDs.
+- Added `.env.sample`, a template of the required environment variables with placeholder values, and stopped git from ignoring it.
 
 ## 9 Oct 2026 · Security pass (BREAKING CHANGE)
-- **Signup no longer reveals which emails are registered:** it always returns `201 "check your email"`. Existing verified users get an "account already exists" email, at most once every 15 minutes.
-- **Closed the pre-account takeover gap:**
+**In short:** the API no longer reveals who has an account, and nobody can take over an email address they don't own.
+
+- **Sign-up no longer reveals which emails are registered:** it always returns `201 "check your email"`. If the account already exists and is verified, the owner gets an "account already exists" email instead, at most once every 15 minutes.
+- **Closed the pre-account takeover gap** (taking over an account by registering it before its real owner). Before, an attacker could register someone else's email with their own password and keep access once the real owner verified it. Now:
   - Sign-in requires a verified email.
-  - Verifying requires the signup password, and a wrong password cancels the link.
+  - Verifying requires the sign-up password, and a wrong password cancels the link.
   - Verifying signs out any earlier sessions.
   - `/me` and `/refresh` reject unverified users.
+- This changed how clients must behave, so it shipped as a breaking change (an update that can break existing clients until they adapt).
 
 ## 9 Oct 2026 · Documentation
-- Added `README.md` (setup, environment variables, how auth works, known limitations), `docs/API.md` (every endpoint with requests, responses, errors and typical flows for frontend developers) and `CLAUDE.md` (conventions and security rules for AI assistants).
-- Writing the docs turned up two gaps: **no CORS configuration**, and **malformed JSON returns 500** instead of 400.
+**In short:** written docs for people setting up, building against and maintaining the API.
+
+- Added `README.md` (setup, settings, how auth works, known limitations), `docs/API.md` (every endpoint with its requests, responses, errors and typical flows, for frontend developers) and `CLAUDE.md` (conventions and security rules for AI assistants).
+- Writing the docs turned up two gaps: **no CORS configuration** (the API can't be called from another website) and **malformed JSON returns 500** instead of 400.
 
 ## 21 Oct 2026 · Frontend, hosting and CI/CD
-- **CKAuth web app** in `frontend/`: React 19 + Vite + Tailwind 4 + React Router. Pages for every flow (sign-up, verify with password, sign-in, forgot/reset, dashboard with avatar upload and change password).
-  - One `api()` wrapper: every call goes to `/api/...` with cookies, and protected calls refresh once on 401, with a single refresh shared by concurrent requests.
-  - Tokens from email links are read once, then removed from the address bar and history.
-- **Production layout: one origin, `ckauth.chiragdev.com`.** `/api/*` goes to Express and everything else to the SPA. The cookies stay first-party and CORS isn't needed. Security headers: CSP, HSTS, and `Referrer-Policy: no-referrer` so email tokens never leak.
-- **Shared VPS.** The Hostinger KVM 2 will host other sites too, so a shared **edge Caddy** (`deploy/edge/`) owns 80/443 and imports one site file per project. CKAuth's `db` is on a private network, and only `api`/`web` join the shared `edge` network, under project-prefixed aliases.
-- **Docker Compose stack** (`deploy/compose.yml`): Postgres with no public port, the API, and the web container. Migrations run with Drizzle's runtime migrator (`src/db/migrate.ts`), so `drizzle-kit` stays out of the image.
-- **Independent deploys.** `api.yml` and `web.yml` run on their own paths (build check on PRs; on `main`, push to GHCR tagged with the SHA) and share `deploy.yml`, which runs `deploy/deploy.sh <service> <sha>` over SSH with a pinned host key. Steps: migrate (api only) → restart that service only → wait for health → record the tag → validate and reload the edge → smoke test. Running a workflow by hand with a SHA rolls back that service alone.
-- `deploy/setup-vps.sh` prepares a fresh Ubuntu VPS: Docker, ufw, fail2ban and unattended upgrades. It creates two users, `chirag` (admin, sudo with a password) and `deploy` (CI only, no sudo), and turns on key-only SSH with root login off. `docs/VPS-ACCESS.md` is a first-time walkthrough for SSH keys, the `ssh vps` alias, a read-only GitHub deploy key on the VPS, and the CI key.
-- **Containers run without root powers:** the API as `node` and the web container as `nobody` on :8080. All have `cap_drop: ALL`, `no-new-privileges` and read-only filesystems. The edge keeps only `NET_BIND_SERVICE`.
+**In short:** a web app for every flow, a production server, and automatic deploys from GitHub.
+
+- **The CKAuth web app** in `frontend/`: a SPA (single-page application, where JavaScript draws each page in the browser) built with React 19 + Vite + Tailwind 4 + React Router, with pages for every flow (sign-up, verify with password, sign-in, forgot/reset, and a dashboard with avatar upload and change password).
+  - One `api()` function makes every call: it sends everything to `/api/...` with cookies, and when a protected call gets a 401 it refreshes the session once and retries. If several concurrent calls fail at the same moment, they share one *single-flight* refresh instead of each starting their own.
+  - Tokens from email links are read once, then removed from the address bar and browser history.
+- **One address in production: `ckauth.chiragdev.com`.** `/api/*` goes to Express and everything else to the SPA. Because both share one origin (scheme + domain + port), the cookies stay first-party (belonging to the site you're on) and CORS isn't needed. Security headers: CSP (which scripts may run), HSTS (always use HTTPS) and `Referrer-Policy: no-referrer`, so tokens in email links never leak to other sites.
+- **A shared server.** The Hostinger KVM 2 VPS will host other sites too, so one shared **edge Caddy** (`deploy/edge/`; Caddy is a web server that also works as a reverse proxy, forwarding requests to the right app) owns ports 80/443 and loads one settings file per project. CKAuth's database sits on a private Docker network; only `api` and `web` join the shared `edge` network, under project-prefixed network aliases (`ckauth-api`, `ckauth-web`) so projects can't clash.
+- **Docker Compose stack** (`deploy/compose.yml`): Postgres with no public port, the API, and the web container. Database migrations (versioned SQL files that change the schema) run with Drizzle's runtime migrator (`src/db/migrate.ts`), so the `drizzle-kit` dev tool stays out of the production image.
+- **Independent deploys** through CI/CD (continuous integration and deployment: automatic checks and releases on every change). Two GitHub Actions workflows, `api.yml` and `web.yml`, each run only when their own folder changes. On a pull request they check the build; on `main` they build a Docker image, push it to GHCR (GitHub's container registry) tagged with the commit SHA (the commit's unique ID), and call the shared `deploy.yml`. That runs `deploy/deploy.sh <service> <sha>` on the VPS over SSH, checking the server's identity against a pinned host key (a known fingerprint, so CI can't be tricked into deploying to an impostor).
+  - Steps: apply migrations (API only) → restart only that service → wait for its health check → record which version is live → validate and reload the edge proxy → smoke test (a quick request to confirm the site answers).
+  - Running a workflow by hand with an older SHA rolls back that service alone.
+- `deploy/setup-vps.sh` prepares a fresh Ubuntu VPS: Docker, a firewall (ufw), fail2ban (bans IPs after repeated failed logins) and unattended upgrades (automatic security updates). It creates two users, `chirag` (admin, `sudo` with a password) and `deploy` (CI only, no `sudo`), and allows SSH by key only, with root login off. `docs/VPS-ACCESS.md` walks through the SSH keys, the `ssh vps` shortcut, a read-only GitHub key on the VPS, and the CI key.
+- **Containers run without root powers:** the API as the `node` user and the web container as `nobody` on port 8080. All of them drop every Linux capability (`cap_drop: ALL`; capabilities are the individual pieces of root's power), set `no-new-privileges` (they can't gain powers later), and use read-only filesystems. The edge keeps only `NET_BIND_SERVICE`, the capability it needs to bind ports 80/443.
 - The domain moved to **`ckauth.chiragdev.com`**.
-- **Renamed the product to CKAuth** (emails, package names, docs). **`EMAIL_FROM` is now required:** there's no longer a fallback to a hard-coded `dsaden.com` address, so changing the mail domain is purely a config change (documented step by step).
-- `deploy/backup.sh`: nightly `pg_dump` with 14-day retention. `/opt/ckauth` and `/opt/edge` are shared by `chirag` and `deploy` through the `deploy` group (setgid folders), so both can work there.
-- `docs/DEPLOYMENT.md` rewritten as a first-timer's guide: 10 setup steps, each with what/why/check, then operations (rollback, settings, changing the email domain, secret rotation, migrations, restore, adding sites) and troubleshooting tables.
-- Tested end to end through the real frontend client and the Vite `/api` proxy: 24 checks, including 3 concurrent 401s sharing a single refresh. The runtime migrator built the full schema on an empty database.
-- Local fix: `main`'s dev database had picked up two migrations from the `microservice-architecture` branch (`sessions` table, `refresh_token` dropped). They were rolled back by hand.
+- **Renamed the product to CKAuth** (emails, package names, docs). **`EMAIL_FROM` is now required:** there's no fallback to a hard-coded `dsaden.com` address any more, so changing the sending domain is purely a settings change (documented step by step).
+- `deploy/backup.sh` dumps the database nightly (`pg_dump`) with 14-day retention. `/opt/ckauth` and `/opt/edge` are shared by `chirag` and `deploy` through the `deploy` group. They're setgid folders (new files automatically belong to the folder's group), so both users can work there.
+- `docs/DEPLOYMENT.md` was rewritten as a first-timer's guide: 10 setup steps, each saying what to do, why, and how to check it, followed by day-to-day operations and troubleshooting tables.
+- Tested end to end through the real frontend code and the Vite `/api` proxy: 24 checks, including 3 simultaneous 401s sharing one refresh. The migrator built the full schema on an empty database.
+- Local fix: `main`'s development database had picked up two migrations from the `microservice-architecture` branch (a `sessions` table, `refresh_token` dropped). They were rolled back by hand.
 
 ## 21 Oct 2026 · Load testing, rate limiting and hashing off the main thread
-- **Load-tested** on 2 pinned cores (KVM 2-like), with a stubbed Resend, using returning-user sessions and real client IPs via `X-Forwarded-For`. Before the fixes:
+**In short:** simulated heavy traffic and attacks, found three serious problems, and fixed them.
+
+- **Load-tested** (simulating many users at once) on 2 pinned CPU cores, matching the KVM 2, with a stubbed Resend (a fake that accepts emails without sending them). The test used returning users' sessions and real client IPs passed in the `X-Forwarded-For` header, the way a proxy reports the original visitor. Response times below are percentiles: p50 is the typical request, and p95 means 95% of requests were at least that fast. Before the fixes:
   - 500 people online was fine.
-  - **2,000 people online collapsed** (p95 12 s).
-  - **32 password-guessing bots took the app down** for real users (p50 28 s).
-  - The API only ever used one core.
-- **Rate limiting** (ported from the `microservice-architecture` design): `express-rate-limit` with a Redis store.
-  - Per IP, per email (failures only) and per user, on every endpoint that checks a password, sends an email or takes a single-use token.
-  - Identical 429s for known and unknown emails.
-  - Fails open if Redis is down.
-  - Redis added to both compose files, with no persistence and a 48 MB cap.
-- **Native `bcrypt`** in place of `bcryptjs`. Hashing runs on libuv's thread pool, so it uses both cores and stops stalling other requests. The hash format is unchanged.
-- **Keep-alive fix:** Node now keeps idle connections for 125 s (`headersTimeout` 126 s) and Caddy's upstream pool closes them at 60 s, so Caddy never reuses a socket Node has closed. Before, that race would have caused random 502s on POSTs.
-- **CPU and memory caps** on every container. CKAuth is capped at ~1.4 GB RAM, and the API at 1.5 vCPU.
+  - **2,000 people online collapsed:** p95 of 12 seconds.
+  - **32 password-guessing bots took the app down** for real users: p50 of 28 seconds.
+  - The API only ever used one of the two cores.
+- **Rate limiting** (capping requests per time window), ported from the `microservice-architecture` design: `express-rate-limit` with a Redis store (Redis is a fast in-memory database, so every API process shares the same counts).
+  - Limits per IP, per email (failed attempts only) and per user, on every endpoint that checks a password, sends an email or uses a single-use token.
+  - The same 429 response for known and unknown emails, so limits don't reveal accounts.
+  - It *fails open*: if Redis is down, requests are allowed through rather than blocked, and the error is logged.
+  - Redis was added to both compose files, with no saving to disk and a 48 MB memory cap.
+- **Native `bcrypt`** instead of `bcryptjs`. Node runs JavaScript on a single main thread (the event loop), so `bcryptjs` froze every request while hashing. The native version hashes on libuv's thread pool (Node's background worker threads), uses both cores, and doesn't block the event loop. The hash format is unchanged, so existing passwords still work.
+- **Keep-alive fix.** Keep-alive means reusing one connection for many requests. Node now keeps idle connections for 125 s (`keepAliveTimeout`, with `headersTimeout` at 126 s), and Caddy's upstream pool (its connections to the app) closes them after 60 s, so Caddy never reuses a socket Node has already closed. Before, that race would have caused random 502s (bad gateway) on POSTs.
+- **CPU and memory caps** on every container: CKAuth as a whole is capped at about 1.4 GB of RAM, and the API at 1.5 vCPU.
 - **After the fixes:**
-  - 2,000 people online: p95 ~100 ms.
-  - Sign-in ~42/s (was 17), sign-up ~39/s (was 16).
-  - One attacker: blocked, and real users keep p95 46 ms.
-  - Botnet with real emails: real users slow to ~0.8 s (was 28 s).
-  - Memory: the API idles at ~270 MB, ~200 MB of it from importing `drizzle-orm@1.0.0-rc.4`'s node-postgres driver.
-- **Closed a sign-in timing leak** found by the load test. Unknown emails answered in ~16 ms and real accounts in ~60 ms, because bcrypt was skipped, which revealed who's registered. Sign-in now compares against a dummy hash (random, made at startup, at the same cost as real hashes): 54.4 ms vs 54.5 ms, with identical bodies.
-- The API now sets `trust proxy` (so `req.ip` is the real client behind Caddy, ready for rate limiting) and drops `X-Powered-By`.
+  - 2,000 people online: p95 of about 100 ms.
+  - Sign-ins about 42 per second (was 17); sign-ups about 39 (was 16).
+  - One attacker: blocked, while real users keep a p95 of 46 ms.
+  - A botnet using real emails: real users slow to about 0.8 s (was 28 s).
+  - Memory: the API idles at about 270 MB, about 200 MB of it from loading `drizzle-orm@1.0.0-rc.4`'s Postgres driver.
+- **Closed a sign-in timing leak** (a secret revealed by how long a response takes), found by the load test. Unknown emails were answered in about 16 ms and real accounts in about 60 ms, because bcrypt was skipped for unknown emails, so response time revealed who was registered. Sign-in now always runs bcrypt, against a dummy hash for unknown emails: 54.4 ms vs 54.5 ms, with identical responses.
+- The API now sets Express's `trust proxy`, so `req.ip` is the visitor's real IP from `X-Forwarded-For` rather than Caddy's, which rate limiting needs. It also drops the `X-Powered-By` header, which advertised Express to attackers.
 
 ## 21 Oct 2026 · VPS SSH hardening fix
-- **SSH password logins were still on.** `setup-vps.sh` wrote its settings to `99-hardening.conf`, which Hostinger's `50-cloud-init.conf` overrode, because `sshd` keeps the first value it reads. Fixed on the VPS by renaming the file to `00-hardening.conf`; the server now offers `publickey` only.
-- `setup-vps.sh` now writes `00-hardening.conf`, removes any old `99-` file, and fails unless `sshd -T` shows password and root logins off.
-- Installed the GitHub Actions key for `deploy`. `docs/VPS-ACCESS.md` Part 3 now uses `ssh -t` with the key in the command, because the old piped version couldn't prompt for `sudo`.
+**In short:** password logins over SSH were still allowed by mistake; now only keys work.
+
+- **SSH password logins were still on.** `setup-vps.sh` wrote its settings to `99-hardening.conf`, but Hostinger's `50-cloud-init.conf` loads first, and `sshd` keeps the *first* value it reads, so Hostinger's "passwords allowed" won. Fixed on the VPS by renaming the file to `00-hardening.conf`; the server now offers `publickey` authentication only.
+- `setup-vps.sh` now writes `00-hardening.conf`, removes any old `99-` file, and fails unless the settings actually in force (`sshd -T`) show password and root logins off.
+- Installed the GitHub Actions key for the `deploy` user. `docs/VPS-ACCESS.md` Part 3 now uses `ssh -t` with the key in the command, because the old piped version couldn't ask for the `sudo` password.
 
 ## 21 Oct 2026 · Edge proxy up
-- Started the shared edge Caddy on the VPS; it got the Let's Encrypt certificate for `ckauth.chiragdev.com` (502 until the first deploy, as expected).
-- **`ACME_EMAIL` was ignored.** Compose's `.env` only fills `${...}` in `compose.yml`; it isn't passed to the container, so Caddy fell back to `admin@chiragdev.com`. `deploy/edge/compose.yml` now passes it through, and the docs no longer suggest `you@example.com` (Let's Encrypt rejects it).
-- Decided on one shared sending domain, `mail.chiragdev.com`, for every project on the VPS (Resend's free plan verifies one domain); receiving stays off.
-- Fixed the failing `Web / check` CI job: `frontend/` now depends on `@types/node` itself instead of borrowing the API package's copy.
+**In short:** the shared proxy is running with a real HTTPS certificate.
+
+- Started the shared edge Caddy on the VPS. It got the Let's Encrypt certificate (free HTTPS certificates, requested over the ACME protocol) for `ckauth.chiragdev.com` (and returned 502 until the app was deployed, as expected).
+- **`ACME_EMAIL` was ignored.** Docker Compose's `.env` file only fills `${...}` placeholders inside `compose.yml`; it isn't passed into the container, so Caddy used its default address. `deploy/edge/compose.yml` now passes it through, and the docs no longer suggest `you@example.com`, which Let's Encrypt rejects.
+- Chose one shared sending domain, `mail.chiragdev.com`, for every project on the VPS (Resend's free plan verifies one domain). Receiving mail stays off.
+- Fixed the failing `Web / check` CI job: `frontend/` now declares `@types/node` (Node's type definitions for TypeScript) itself instead of borrowing the API package's copy.
 
 ## 21 Oct 2026 · First production deploy
-- Merged to `main`: api, db and redis deployed and are healthy on the VPS.
-- **The web container failed its health check.** Caddy's binary has a file capability that `cap_drop: [ALL]` forbids, so it couldn't start (`operation not permitted`). The web image now removes the capability at build time, and its tmpfs folders belong to the non-root user. Both checked on the VPS under production restrictions before committing.
+**In short:** the app is live; one container needed a fix to start under the security restrictions.
+
+- Merged to `main`: the API, database and Redis deployed and are healthy on the VPS.
+- **The web container failed its health check.** The official Caddy binary carries a file capability (a Linux capability attached to the program file) that `cap_drop: [ALL]` forbids, so it couldn't start (`operation not permitted`). The web image now removes that capability at build time, and its tmpfs folders (in-memory scratch space in an otherwise read-only container) belong to the non-root user. Both fixes were checked on the VPS under production restrictions before committing.
 
 ## 21 Oct 2026 · Web redesign and sign-in on verify
-- **Verifying an email now signs the user in.** The link plus the sign-up password is the same proof sign-in asks for, so `/auth/verify-email/:token` sets the session cookies. The new refresh token is saved in the same conditional `UPDATE` that marks the email verified, so a request that loses a race gets no session.
-- Rebuilt the web app on shadcn/ui (Radix + Tailwind v4 tokens) with an original "walls" theme, a self-drawn crest and a new landing page.
-- Light, dark and system themes. `public/theme-init.js` applies the theme before React loads; it's a file because the CSP blocks inline scripts. Fonts are self-hosted for the same reason.
-- Forms now validate inline (mirroring the Zod models), show friendly messages instead of raw Zod text, have a show-password button, and check new passwords against a requirement list and a strength meter. New passwords need 8+ characters with a letter and a number on the client; the API still accepts 6.
-- Compared three looks side by side with a temporary dev-only design lab, then chose **Dusk**: a Cinzel display face, ember and steel colours, and pill buttons. The two losing looks and their fonts are gone; the lab stays as a dev tool for future redesigns (its panel hides until there are two or more looks).
-- **The hero is plain shadcn, no illustrations.** A sky-and-walls SVG scene with a giant was tried and dropped as too heavy. The hero now pairs the headline with a card that walks a `GET /auth/me` through the checks `authenticateToken` really runs (authentication: cookie, token, account → 401; authorization: verified email → 403). The auth side panel, closing call to action and 404 use the same faint CSS grid. The theme control is a one-click toggle.
+**In short:** verifying your email now signs you in, and the web app has a new look.
+
+- **Verifying an email now signs the user in.** The link plus the sign-up password is the same proof sign-in asks for, so `/auth/verify-email/:token` sets the session cookies. The new refresh token is saved in the same conditional `UPDATE` that marks the email verified (`UPDATE … WHERE … RETURNING`, which changes the row only if it's still unverified and reports whether it did). If two verification requests race, only the winner gets a session.
+- Rebuilt the web app on shadcn/ui (copy-in components built on Radix's accessible primitives, styled with Tailwind v4 design tokens, the named colours and sizes the whole UI shares), with an original "walls" theme, a self-drawn crest and a new landing page.
+- Light, dark and system themes. `public/theme-init.js` applies the theme before React loads, so the page never flashes the wrong colours. It's a separate file because the CSP blocks inline scripts; fonts are self-hosted for the same reason.
+- Forms now check input as you type (mirroring the API's Zod rules), show friendly messages instead of raw validation text, have a show-password button, and check new passwords against a requirement list and a strength meter. New passwords need 8+ characters with a letter and a number in the web app; the API still accepts 6.
+- Compared three looks side by side with a temporary, development-only design lab, then chose **Dusk**: a Cinzel display font, ember and steel colours, and pill-shaped buttons. The two losing looks and their fonts were removed; the lab stays for future redesigns (its panel stays hidden until there are two or more looks).
+- **The hero (the top of the landing page) is plain shadcn, with no illustrations.** A sky-and-walls drawing with a giant was tried and dropped as too heavy. The hero now pairs the headline with a card that walks a `GET /auth/me` request through the checks `authenticateToken` really runs: authentication (cookie, token, account; failures are 401) and authorization (verified email; failure is 403). The side panel on the auth pages, the closing call to action and the 404 page share a faint background grid. The theme control is a one-click toggle.
 - Subtle nods in the copy: walls Maria/Rose/Sina, "104th Cadet Corps", "Year 850", "titan at the gate" in the 429 log line, and 心臓を捧げよ in the footer. No copyrighted art or logos are used.
-- **The shadcn CLI imported `cn` from npm** instead of `@/lib/utils`, and installed an unrelated package called `cn`. Removed it and fixed the imports.
+- **The shadcn CLI imported `cn` from npm** instead of our own `@/lib/utils`, and installed an unrelated package called `cn`. Removed it and fixed the imports.
+
+## 21 Oct 2026 · SEO
+**In short:** search engines and link previews can now see the home page, the server answers like a proper website, and a strict audit shows what's left.
+
+- **The home page is prerendered at build time.** Before, every address returned the same empty `<div id="root">` and JavaScript drew the page in the browser. Crawlers that don't run JavaScript (Bing in part, link previews in Slack/LinkedIn/X/WhatsApp, most AI crawlers) saw nothing, and Google only saw the content in its slower second pass. Now `pnpm build` renders `/` in Node (`src/entry-server.tsx` → `scripts/prerender.js`) and the browser *hydrates* it, meaning React takes over the finished HTML.
+  - Every other page gets `dist/app.html`, an empty shell; otherwise `/sign-in` would receive the home page's HTML. `main.tsx` hydrates only when the HTML is marked as prerendered for the current address.
+  - The theme toggle's label no longer depends on the theme. The prerender can't know a visitor's theme, and React 19 doesn't fix attributes that differ when it hydrates.
+  - Checked by hydrating the built page in jsdom (a browser simulated in Node) with React's development build: no mismatches in light mode, dark mode or signed in. Changing one word of the HTML was reported, which proves the check works.
+- **The web server now answers like a website, not only an app.** Before, every address fell back to `index.html` with status 200, including `/robots.txt` and misspelled URLs. Search engines call those "soft 404s". Now:
+  - `/sign-in` and the other app pages get the shell plus an `X-Robots-Tag: noindex` header (keep out of search results).
+  - Real files are served as files.
+  - Anything else is a real **404** that still shows the 404 page.
+  - Tested against the Caddyfile with Caddy 2.10.
+- New files and tags:
+  - `robots.txt` blocks only `/api/`, so crawlers can still see the app pages' `noindex`.
+  - `sitemap.xml` lists only the home page.
+  - A canonical URL and Open Graph/Twitter tags with a 1200×630 preview card (`public/og.png`, drawn from the crest; source `og-image.svg`).
+  - `WebSite`/`WebApplication` structured data (JSON-LD). It reuses the meta description, so the two can't drift apart.
+- **Strict audit** in `docs/SEO-AUDIT.md`: 64 pass/fail tests. The live site scores 14/100, this build 33, and about 80 after the phase-1 quick fixes. The code isn't the problem. The domain is (registered today, a parked page at the root, no links), there is only one page search engines can show, and nothing is measured.
+- Smaller changes:
+  - Each page sets its own browser-tab title (`useDocumentTitle`).
+  - App pages load on demand. The main bundle went from 155.5 to 149.6 kB gzipped; React, the router and the header's Radix menu are most of what remains.
+  - The two fonts on the first screen are preloaded, so they start downloading with the HTML.
 
 ---
 
@@ -126,10 +183,61 @@ Newest entries go at the bottom, under a dated heading.
 Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.md](LEARNINGS.md).
 
 ## Next up
+Short-term work, roughly in order. Bracketed IDs such as [B01] point to tests in [docs/SEO-AUDIT.md](docs/SEO-AUDIT.md).
+
+- **SEO phase 1:**
+  - Finish the search title and description (the `TODO(human)` in `frontend/index.html`) and put "authentication" in the hero [O01–O03], then commit and deploy the SEO build.
+  - Verify `chiragdev.com` in Google Search Console and Bing Webmaster Tools (DNS TXT records cover every subdomain), submit `sitemap.xml`, request indexing, and check with Google's Rich Results Test [C10, C11]. Add an IndexNow ping to `deploy.sh` [C12].
+  - Replace the Hostinger parked page on `chiragdev.com` with a portfolio that links to CKAuth [D02].
+  - Show the hero text without the opacity-0 fade-in, which delays the main content appearing [P02, A06]; fix the contrast failures [A02]; add a skip link [A03].
+  - Stop the `/auth/me` + `/auth/refresh` 401 errors on every visit by a signed-out user [B01].
+  - Add a CAA record, an AAAA (IPv6) record, COOP/CORP headers and a `/index.html` → `/` redirect [B06, P12, B07, C07].
+  - Set the GitHub repo's homepage, description and topics; link the repo and API docs from the footer; add Person JSON-LD with `sameAs`; add PNG icons and a `site.webmanifest` [D05, O11, O08, O09].
+  - Self-host Umami analytics, add an external uptime check, count the sign-up funnel, and extend the domain registration to 2+ years with auto-renew [M01–M03, D08].
+  - Add a DMARC report address (`rua`) now and move to `p=quarantine` after 2–4 clean weeks; register `mail.chiragdev.com` in Google Postmaster Tools [D07].
+  - Launch posts: Show HN, r/node, r/webdev, dev.to, LinkedIn [M05].
+- **SEO phase 2 (months 1–3):** two articles a month on `chiragdev.com/blog` based on LEARNINGS, cross-posted with canonical links, to earn the first links from other sites [O06, D03].
+- **SEO phase 3 (months 3–12):** API docs as site pages [O06]; landing-page JavaScript under 100 kB gzipped and critical CSS inlined [P03, P06–P08]; listings on curated "awesome" lists; a monthly Search Console review [M04]; HSTS `includeSubDomains` + preload once every subdomain is HTTPS-only [B03].
 - First production deploy to the VPS (follow `docs/DEPLOYMENT.md`).
-- Move the sender to a CKAuth-branded domain (`EMAIL_FROM` only, see "Changing the email domain").
-- Investigate `drizzle-orm` rc's ~200 MB import cost (upgrade when a fixed release ships).
-- Cloudflare (WAF/Turnstile) in front, for botnet-scale credential stuffing.
-- Automated off-server database backups.
+- Move the sender to a CKAuth-branded domain (only `EMAIL_FROM` changes; see "Changing the email domain" in the deployment guide).
+- Investigate why `drizzle-orm`'s release candidate costs about 200 MB of memory to load (upgrade when a fixed release ships).
+- Put Cloudflare (WAF/Turnstile) in front, against botnet-scale credential stuffing; it would also cut response times for distant visitors [P09].
+- Automated database backups stored off the server.
 - Return 400, not 500, for malformed JSON bodies.
 - Possibly let a password reset also mark the email as verified.
+
+## Future scope
+Larger directions beyond Next up, roughly in order of value. Each one says what in the current code it builds on or changes.
+
+**Accounts and sessions**
+- **Many sessions per user.** `users.refresh_token` holds a single session, so signing in on a second device ends the first. A `sessions` table (the `microservice-architecture` branch already has one) would add a device list, "sign out this device" and "sign out everywhere else".
+- **Revoking access tokens at once.** Closes a known gap: today a signed-out access token keeps working until it expires (up to 15 minutes). A per-user session version checked by `authenticateToken` would end it immediately.
+- **Change email.** Verify the new address before switching, and tell the old one. Today the email is fixed once the account exists.
+- **Edit profile, delete account, export data.** Today the name only changes at sign-up and the avatar only through upload. Deletion and a JSON export cover the basics of GDPR, the EU's data-protection law (deletion must remove the ImageKit avatar too).
+- **Security emails.** "New sign-in from …", "Your password was changed", "Your email was verified": sent in the background, like the existing emails.
+
+**Stronger sign-in**
+- **Two-factor authentication.** Six-digit codes from an authenticator app (TOTP), with hashed recovery codes; a second step after the password, with its own rate limit.
+- **Passkeys (WebAuthn).** Sign in with the device's fingerprint, face or PIN, with no password; the strongest protection against phishing.
+- **Breached-password check.** Reject passwords that appear in Have I Been Pwned's leak database at sign-up, reset and change. Its range API only receives the first five characters of the password's hash, never the password.
+- **Google and GitHub sign-in.** Link to an existing account by email only when the provider says the email is verified, and never to an unverified local account (LEARNINGS, "Pre-account takeover").
+- **Magic-link sign-in.** Sign in from an emailed link, reusing the existing single-use, hashed, 15-minute token pattern.
+
+**Authorization**
+- **Roles and permissions.** The landing page promises "decide what gets through": add roles (user, admin), a `requireRole()` middleware that runs after `authenticateToken`, and permission checks per route.
+- **Admin dashboard.** Search users, see sessions and rate-limit hits, resend verification emails, lock or unlock an account.
+- **Activity log.** Sign-ins, password changes and failed attempts, shown to the user on their dashboard.
+
+**CKAuth as a product for other apps**
+- **Hosted sign-in for other apps.** Register an app, get keys, send users to CKAuth's sign-in page and back. Built on OpenID Connect (the standard behind "Sign in with Google", using the authorization-code flow with PKCE), so any standard client library works.
+- **SDKs.** `@ckauth/react` (a provider, `useAuth` and protected routes; mostly `frontend/src/lib/auth.tsx` and `api.ts` today) and an Express middleware package.
+- **Webhooks.** Notify other apps of `user.created`, `user.verified` and `session.revoked`, signed with HMAC so they can prove the message came from CKAuth.
+- **CORS per registered app,** needed as soon as a frontend on another origin uses the API (see Known gaps in CLAUDE.md).
+- **Self-host kit.** The compose stack, edge proxy and setup script, packaged as a documented template for running your own copy.
+
+**Quality and operations**
+- **Automated tests.** There is no test suite yet. Start with integration tests of every flow against a real Postgres and Redis in CI, including the race-condition and account-enumeration rules in CLAUDE.md.
+- **OpenAPI from the Zod models.** Generate a machine-readable API description from `models.ts`, so `docs/API.md` and a typed client can't drift from the code.
+- **Observability.** Structured JSON logs, request IDs, metrics (response times, error rates, rate-limit hits) and error tracking with alerts.
+- **Email templates and languages.** Branded, tested email templates, and translations for emails and the web app.
+- **Accessibility pass.** A full WCAG 2.2 AA review of the forms and dashboard, beyond the landing page covered in `docs/SEO-AUDIT.md`.

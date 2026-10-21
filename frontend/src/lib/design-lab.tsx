@@ -22,7 +22,8 @@ function isLook(value: string | null): value is string {
 
 // ?look=<id> wins, so a link can open a specific candidate; otherwise the last one picked
 function initialLook() {
-  if(!LAB_ENABLED) return DEFAULT_LOOK
+  // no window during the build-time prerender, even in a VITE_DESIGN_LAB=1 build
+  if(!LAB_ENABLED || typeof window === 'undefined') return DEFAULT_LOOK
   const fromUrl = new URLSearchParams(window.location.search).get('look')
   if(isLook(fromUrl)) return fromUrl
   try {

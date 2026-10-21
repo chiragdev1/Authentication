@@ -9,8 +9,11 @@ import { validateExistingPassword } from '@/lib/validation.ts'
 import { AuthShell } from '@/components/auth-shell.tsx'
 import { FormAlert, PasswordField } from '@/components/form.tsx'
 import { Button } from '@/components/ui/button.tsx'
+import { useDocumentTitle } from '@/lib/use-document-title.ts'
 
 export function VerifyEmail() {
+  useDocumentTitle('Verify your email')
+
   const token = useUrlToken()
   const navigate = useNavigate()
   const { reloadUser } = useAuth()

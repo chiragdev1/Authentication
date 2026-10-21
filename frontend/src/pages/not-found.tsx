@@ -1,7 +1,9 @@
 import { Link } from 'react-router'
 import { Button } from '@/components/ui/button.tsx'
+import { useDocumentTitle } from '@/lib/use-document-title.ts'
 
 export function NotFound() {
+  useDocumentTitle('Page not found')
   return (
     <div className="relative isolate flex flex-1 flex-col items-center justify-center overflow-hidden px-4 py-24 text-center">
       <div aria-hidden className="bg-grid pointer-events-none absolute inset-0 -z-10 opacity-60" />

@@ -7,8 +7,11 @@ import { validateEmail, validateFirstName, validateLastName, validateNewPassword
 import { AuthShell } from '@/components/auth-shell.tsx'
 import { FormAlert, PasswordField, TextField } from '@/components/form.tsx'
 import { Button } from '@/components/ui/button.tsx'
+import { useDocumentTitle } from '@/lib/use-document-title.ts'
 
 export function SignUp() {
+  useDocumentTitle('Create an account')
+
   const [sentTo, setSentTo] = useState<string | null>(null)
 
   const form = useForm({

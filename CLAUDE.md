@@ -11,7 +11,7 @@ The product is **CKAuth**, at `https://ckauth.chiragdev.com`. `frontend/` holds 
 - CKAuth's site file (`deploy/ckauth.caddy`) proxies `/api/*` (with `/api` stripped) to `ckauth-api` and everything else to `ckauth-web`. That makes it one origin, so no CORS.
 - `api` and `web` deploy **independently**: separate images, the `API_TAG`/`WEB_TAG` tags, and the `api.yml`/`web.yml` workflows chosen by path filters, which share `deploy.yml` → `deploy/deploy.sh`.
 
-- Human docs: `README.md` (setup), `docs/API.md` (endpoint contract), `docs/DEPLOYMENT.md` (production)
+- Human docs: `README.md` (setup), `docs/API.md` (endpoint contract), `docs/DEPLOYMENT.md` (production), `docs/SEO-AUDIT.md` (strict SEO/traffic tests, scores and the traffic plan), `docs/GLOSSARY.md` (every term the docs use). Docs are written for beginners but stay professional: keep the technical term and explain it on first use, and add new terms to the glossary
 - Project history: `DEVLOG.md` (timeline), `LEARNINGS.md` (mistakes → rules)
 
 ## Commands
@@ -42,8 +42,10 @@ There is no test suite. Verify changes by building, then running the real flow a
 - `frontend/src/components/ui/`: shadcn components (edit freely, they're ours); `form.tsx` (fields, password reveal and strength), `auth-shell.tsx`, `brand.tsx`. No illustrations: backdrops are CSS only (`.bg-grid`, `.bg-wall` in `index.css`), and any themed art must stay original (no copyrighted art). Colours are tokens in `src/index.css`; `dark:` follows the `.dark` class set by `lib/theme.tsx` and `public/theme-init.js`
 - `frontend/src/lib/design-lab.tsx` + `components/design-lab-panel.tsx`: dev-only switcher for comparing candidate designs on the real pages (Alt+1…9, Alt+T, `?look=<id>`). The panel hides while `looks` has one entry. Production always renders the first look
 - `frontend/src/lib/use-form.ts` + `validation.ts`: every form's state, inline errors (mirroring `models.ts`) and API error → field mapping
-- `frontend/src/pages/`: one file per route; routes for email links are fixed by the API (`/verify-email`, `/reset-password`, `/sign-in`, `/forgot-password`)
-- `Dockerfile` (api image), `frontend/Dockerfile` + `frontend/Caddyfile` (web image: internal static server on :80, no TLS)
+- `frontend/src/pages/`: one file per route; routes for email links are fixed by the API (`/verify-email`, `/reset-password`, `/sign-in`, `/forgot-password`). Each page sets its tab title with `useDocumentTitle()`
+- `frontend/src/app.tsx`: the routes and provider tree, shared by `main.tsx` (browser) and `entry-server.tsx` (build). Every page except home is lazy-loaded. A new route must also go in the `@app` list in `frontend/Caddyfile`
+- **SEO / prerender:** `pnpm build` also renders `/` in Node (`scripts/prerender.js`) into `dist/index.html`, and writes `dist/app.html`, the empty shell every other route gets. So anything the home page renders must work without `window`/`document`, and must render the same on the first client pass: no theme-, auth- or date-dependent markup, since React doesn't fix mismatched attributes when it hydrates. Only `/` is indexed (`public/robots.txt`, `sitemap.xml`); the meta/OG tags are in `index.html`, and `og-image.svg` is the source of `public/og.png`
+- `Dockerfile` (api image), `frontend/Dockerfile` + `frontend/Caddyfile` (web image: internal static server on :8080, no TLS; app routes → `app.html` + `noindex`, unknown paths → real 404)
 - `deploy/compose.yml` (CKAuth stack; `db` only on the `internal` network, `api`/`web` also on the external `edge` network), `deploy/deploy.sh` (runs on the VPS), `deploy/ckauth.caddy` (public routing + security headers), `deploy/edge/` (shared proxy)
 - `.github/workflows/api.yml`, `web.yml` → reusable `deploy.yml`
 
@@ -82,7 +84,7 @@ if(!validationResult.success) {
 - **API changes:** update `docs/API.md` and the frontend in the same change.
 - **Deploys:** migrations run automatically before the new API starts, and rollbacks don't undo them, so keep migrations backwards-compatible. New env vars go in `deploy/api.env.sample` and `docs/DEPLOYMENT.md`, and must be added to `/opt/ckauth/api.env` on the VPS before the deploy that needs them. VPS users: `chirag` (admin, sudo) and `deploy` (CI only, no sudo); root SSH is off. `/opt/ckauth` and `/opt/edge` are setgid folders owned by the `deploy` group, which `chirag` belongs to, so scripts must work whichever of the two owns a file (rename into place, don't `chmod` or `chown`). Settings changes need `docker compose up -d api`, not `restart`. `deploy/backup.sh` is the nightly dump. Containers run as non-root with `cap_drop: [ALL]`, `no-new-privileges` and read-only filesystems where possible, so keep it that way when adding services. The production database has no public port and isn't on the `edge` network. Security headers belong in `deploy/ckauth.caddy`, not in the web container. Breaking changes need a `BREAKING CHANGE:` footer in the commit.
 - **Commits:** Conventional Commits (`feat(auth): …`, `fix(auth): …`), with a body explaining *why* for any behaviour or security change. Only commit when the user asks.
-- **After notable changes:** add a dated entry to `DEVLOG.md` (above the `---` before "Lessons") and update its "Next up". Add any mistake or lesson to `LEARNINGS.md` under its topic, in the format *what went wrong → fix → **Rule:***.
+- **After notable changes:** add a dated entry to `DEVLOG.md` (above the `---` before "Lessons") and update its "Next up" (short-term to-dos) and "Future scope" (larger product directions). Add any mistake or lesson to `LEARNINGS.md` under its topic, in the format *what went wrong → fix → **Rule:***.
 
 ## Known gaps
 
@@ -90,3 +92,14 @@ if(!validationResult.success) {
 - No CORS middleware (not needed while the frontend is same-origin).
 - Malformed or oversized JSON bodies return 500, because `errorHandler` only recognises `ApiError` (body-parser errors carry `status` 400/413).
 - Ending a session revokes the refresh token, but access tokens stay valid until they expire (there is no access-token denylist).
+- **SEO and traffic** (full list with test IDs in `docs/SEO-AUDIT.md`; this build scores 33/100 on its strict tests):
+  - The domain is new (registered 21 Oct 2026), `chiragdev.com` itself is a Hostinger parked page, no sites link in yet, and `/` is the only indexable page.
+  - The search title and description lack topic words (`TODO(human)` in `frontend/index.html`).
+  - The hero's `animate-in fade-in` starts at opacity 0, which delays LCP (2.4 s mobile lab).
+  - Every anonymous visit logs two 401s (`/auth/me`, then `/auth/refresh`).
+  - Ten text elements fail WCAG AA contrast (muted `/70`, `opacity-40`, the wall labels); there's no skip link.
+  - The landing bundle is ~150 kB gzip, with ~79 KiB of it unused there; the CSS and `theme-init.js` block rendering.
+  - `/index.html` answers 200 alongside `/` (only the canonical tag deduplicates them).
+  - No CDN, no IPv6, no CAA record, no COOP/CORP; HSTS has no `includeSubDomains`/preload; the CSP still allows inline styles.
+  - DMARC is `p=none` with no reports; there's no analytics or uptime monitoring.
+  - The prerendered footer year is the build year until the client re-renders, and the `@app` route list in `frontend/Caddyfile` must be kept in sync with `src/app.tsx` by hand.

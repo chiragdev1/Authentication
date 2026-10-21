@@ -7,10 +7,13 @@ import { validateConfirmation, validateNewPassword } from '@/lib/validation.ts'
 import { AuthShell } from '@/components/auth-shell.tsx'
 import { FormAlert, PasswordField } from '@/components/form.tsx'
 import { Button } from '@/components/ui/button.tsx'
+import { useDocumentTitle } from '@/lib/use-document-title.ts'
 
 const requestNewLink = <Link to="/forgot-password" className="font-medium text-primary hover:underline">Request a new link</Link>
 
 export function ResetPassword() {
+  useDocumentTitle('Reset your password')
+
   const token = useUrlToken()
   const navigate = useNavigate()
   const { signOut } = useAuth()
