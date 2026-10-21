@@ -1,6 +1,8 @@
 # ckauth stack, lives at /opt/ckauth on the vps next to .env and api.env
 # images are built by github actions; API_TAG and WEB_TAG are git shas, so api and web deploy (and roll back) independently
 # nothing here publishes a port: the shared edge proxy (/opt/edge) reaches api and web over the `edge` network
+# every service has a memory cap (ckauth can never use more than ~1.4 GB) and a cpu cap; the api's 1.5 vcpus is the one that
+# matters, so even a password-guessing flood leaves at least half a vcpu for other sites (see docs/DEPLOYMENT.md, "Resource budget")
 name: ckauth
 
 services:
@@ -23,6 +25,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 768M}
 
   # rate limit counters, shared by every api process; they expire on their own, so nothing is persisted
   redis:
@@ -43,6 +48,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 64M}
 
   # one-off, run by the api deploy before the new api starts: docker compose run --rm migrate
   # the profile keeps a plain `up` (e.g. after a reboot) from running it
@@ -88,6 +96,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # 1.5 of the 2 vcpus: password hashing can use both cores, but never all of the machine
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 512M}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8080/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -104,6 +116,9 @@ services:
     read_only: true
     # caddy wants somewhere to write its runtime state, even as a plain file server
     tmpfs: [/data, /config]
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 64M}
     networks:
       edge:
         aliases: [ckauth-web]

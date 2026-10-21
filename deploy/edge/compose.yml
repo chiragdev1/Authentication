@@ -25,6 +25,10 @@ services:
       - caddy_config:/config
     networks:
       - edge
+    # shared by every site, so it gets a cap of its own rather than borrowing from any one project
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 256M}
 
 networks:
   edge:
