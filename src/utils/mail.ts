@@ -3,7 +3,11 @@ import {Resend} from "resend"
 import {ApiError} from "./api-error.js"
 
 const resendClient = new Resend(process.env.RESEND_API_KEY)
-const from = process.env.EMAIL_FROM || "team@dsaden.com"
+// no fallback address: the sender domain is configuration (it must be verified in resend), never baked into the code
+if(!process.env.EMAIL_FROM) {
+  throw new Error("EMAIL_FROM is not set, e.g. CKAuth <no-reply@yourdomain.com>")
+}
+const from = process.env.EMAIL_FROM
 
 async function sendEmail(to: string, subject: string, html: string, text: string) {
   const {data, error} = await resendClient.emails.send({
@@ -38,7 +42,7 @@ export async function sendWelcomeMail(to: string, firstName: string) {
 
   return await sendEmail(
     to,
-    `Welcome to ${process.env.APP_NAME || "DSADEN"}!`,
+    `Welcome to ${process.env.APP_NAME || "CKAuth"}!`,
     htmlContent,
     textContent,
   );
@@ -81,7 +85,7 @@ function escapeHtml(value: string): string {
 
 function generateEmailVerificationHtml(
   verificationUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = process.env.APP_NAME || "CKAuth",
   expiresInMinutes: number = 15,
 ): string {
   const url = escapeHtml(verificationUrl)
@@ -229,7 +233,7 @@ function generateEmailVerificationHtml(
 }
 function generateEmailVerificationText(
   verificationUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = process.env.APP_NAME || "CKAuth",
   expiresInMinutes: number = 15,
 ): string {
   const year = new Date().getFullYear()
@@ -255,7 +259,7 @@ function generateEmailVerificationText(
 
 function generateWelcomeHtml(
   firstName: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = process.env.APP_NAME || "CKAuth",
   appUrl: string = process.env.FRONTEND_URL || "http://localhost:3000",
 ): string {
   const userName = escapeHtml(firstName)
@@ -434,7 +438,7 @@ function generateWelcomeHtml(
 
 function generateWelcomeText(
   firstName: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = process.env.APP_NAME || "CKAuth",
   appUrl: string = process.env.FRONTEND_URL || "http://localhost:3000",
 ): string {
   const year = new Date().getFullYear()
@@ -469,7 +473,7 @@ function generateWelcomeText(
 function generateResetPasswordHtml(
   firstName: string,
   resetUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = process.env.APP_NAME || "CKAuth",
   expiresInMinutes: number = 15,
 ): string {
   const userName = escapeHtml(firstName)
@@ -621,7 +625,7 @@ function generateResetPasswordHtml(
 function generateResetPasswordText(
   firstName: string,
   resetUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = process.env.APP_NAME || "CKAuth",
   expiresInMinutes: number = 15,
 ): string {
   const year = new Date().getFullYear()
@@ -650,7 +654,7 @@ function generateAccountExistsHtml(
   firstName: string,
   signinUrl: string,
   forgotPasswordUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = process.env.APP_NAME || "CKAuth",
 ): string {
   const userName = escapeHtml(firstName)
   const signin = escapeHtml(signinUrl)
@@ -796,7 +800,7 @@ function generateAccountExistsText(
   firstName: string,
   signinUrl: string,
   forgotPasswordUrl: string,
-  appName: string = process.env.APP_NAME || "DSADEN",
+  appName: string = process.env.APP_NAME || "CKAuth",
 ): string {
   const year = new Date().getFullYear()
 

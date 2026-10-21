@@ -8,6 +8,10 @@ import { errorHandler } from './middlewares/error-handler.js';
 export function createExpressApplication(): Express {
   const app = express()
 
+  // in production caddy sits in front, so trust one proxy hop for req.ip and req.secure
+  app.set('trust proxy', 1)
+  app.disable('x-powered-by')
+
   // middlewares
   app.use(express.json({limit: '50kb'}))
   app.use(express.urlencoded({extended: true}))
