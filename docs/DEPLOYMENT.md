@@ -204,7 +204,8 @@ scp deploy/ckauth.caddy vps:/opt/edge/sites/
 ```bash
 cd /opt/edge
 # optional: the address Let's Encrypt emails if a certificate is about to expire
-echo "ACME_EMAIL=you@example.com" > .env
+# (default admin@chiragdev.com; use a real inbox, Let's Encrypt rejects example.com)
+echo "ACME_EMAIL=<your real email>" > .env
 docker compose up -d
 docker compose logs -f caddy
 ```

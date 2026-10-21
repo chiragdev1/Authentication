@@ -71,6 +71,8 @@ For the timeline, see [DEVLOG.md](DEVLOG.md).
   **Rule:** for `sshd` (unlike most config systems) the first value wins, so drop-ins that must win go first (`00-`). Verify the effective config (`sshd -T`, or the login methods `ssh -v` reports), not the file you wrote.
 - **Piping data into `ssh host "sudo …"` can't work.** Without a terminal `sudo` can't prompt; with `-t`, it reads the piped data as the password. → Put the data in the command string (`ssh -t vps "echo '$(cat key.pub)' | sudo tee -a …"`), leaving stdin for the prompt.
   **Rule:** a remote `sudo` that may prompt gets `ssh -t` and nothing piped on stdin.
+- **The edge proxy ignored `ACME_EMAIL`.** The docs said to put it in `/opt/edge/.env`, but Compose uses `.env` only to fill `${...}` in `compose.yml`, and nothing there passed it to the container, so Caddy used its default address. → `environment: ACME_EMAIL: ${ACME_EMAIL:-…}` in `deploy/edge/compose.yml`.
+  **Rule:** a value in a Compose `.env` reaches a container only through `environment:` or `env_file:`; check with `docker compose exec <service> env`.
 
 ## Performance
 

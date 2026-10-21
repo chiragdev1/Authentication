@@ -100,13 +100,17 @@ Newest entries go at the bottom, under a dated heading.
 - `setup-vps.sh` now writes `00-hardening.conf`, removes any old `99-` file, and fails unless `sshd -T` shows password and root logins off.
 - Installed the GitHub Actions key for `deploy`. `docs/VPS-ACCESS.md` Part 3 now uses `ssh -t` with the key in the command, because the old piped version couldn't prompt for `sudo`.
 
+## 21 Oct 2026 · Edge proxy up
+- Started the shared edge Caddy on the VPS; it got the Let's Encrypt certificate for `ckauth.chiragdev.com` (502 until the first deploy, as expected).
+- **`ACME_EMAIL` was ignored.** Compose's `.env` only fills `${...}` in `compose.yml`; it isn't passed to the container, so Caddy fell back to `admin@chiragdev.com`. `deploy/edge/compose.yml` now passes it through, and the docs no longer suggest `you@example.com` (Let's Encrypt rejects it).
+- Decided on one shared sending domain, `mail.chiragdev.com`, for every project on the VPS (Resend's free plan verifies one domain); receiving stays off.
+
 ---
 
 ## Lessons
 Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.md](LEARNINGS.md).
 
 ## Next up
-- Rate limiting (design ready: Redis store, separate limits per IP and per email).
 - First production deploy to the VPS (follow `docs/DEPLOYMENT.md`).
 - Move the sender to a CKAuth-branded domain (`EMAIL_FROM` only, see "Changing the email domain").
 - Investigate `drizzle-orm` rc's ~200 MB import cost (upgrade when a fixed release ships).
