@@ -1,6 +1,6 @@
 # VPS access: SSH and GitHub
 
-A first-time walkthrough for connecting to the Hostinger VPS from your laptop, and connecting the VPS to GitHub.
+A first-time walkthrough for connecting to the Hostinger VPS from your laptop, and connecting the VPS to GitHub. SSH, keys, `sudo` and the other terms used here are defined in the [glossary](GLOSSARY.md).
 
 > **`203.0.113.10` is a placeholder.** It's from a range reserved for documentation, so it never belongs to a real server. Wherever you see it, use your VPS's IP from **hPanel → VPS → Overview**.
 
