@@ -67,6 +67,10 @@ For the timeline, see [DEVLOG.md](DEVLOG.md).
   **Rule:** a package with its own `tsconfig` inside another package needs the outer one scoped explicitly.
 - **The first VPS script would have locked out the admin.** It turned off root SSH, but the only remaining user (`deploy`) had no `sudo`. → A separate `chirag` admin user with sudo; `deploy` is CI-only.
   **Rule:** before turning off a way in, make sure another way in with the same powers exists, and test it in a new terminal.
+- **SSH password logins stayed on after hardening.** The script wrote `PasswordAuthentication no` to `sshd_config.d/99-hardening.conf`, but `sshd` keeps the *first* value it reads, and Hostinger's `50-cloud-init.conf` loads earlier with `yes`. The server kept accepting passwords for `chirag`; it only came to light when a failed key login fell back to a password prompt. → Renamed to `00-hardening.conf`, and the script now checks `sshd -T` (the settings in force) and fails if they're wrong.
+  **Rule:** for `sshd` (unlike most config systems) the first value wins, so drop-ins that must win go first (`00-`). Verify the effective config (`sshd -T`, or the login methods `ssh -v` reports), not the file you wrote.
+- **Piping data into `ssh host "sudo …"` can't work.** Without a terminal `sudo` can't prompt; with `-t`, it reads the piped data as the password. → Put the data in the command string (`ssh -t vps "echo '$(cat key.pub)' | sudo tee -a …"`), leaving stdin for the prompt.
+  **Rule:** a remote `sudo` that may prompt gets `ssh -t` and nothing piped on stdin.
 
 ## Performance
 

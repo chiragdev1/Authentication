@@ -95,6 +95,11 @@ Newest entries go at the bottom, under a dated heading.
 - **Closed a sign-in timing leak** found by the load test. Unknown emails answered in ~16 ms and real accounts in ~60 ms, because bcrypt was skipped, which revealed who's registered. Sign-in now compares against a dummy hash (random, made at startup, at the same cost as real hashes): 54.4 ms vs 54.5 ms, with identical bodies.
 - The API now sets `trust proxy` (so `req.ip` is the real client behind Caddy, ready for rate limiting) and drops `X-Powered-By`.
 
+## 21 Oct 2026 · VPS SSH hardening fix
+- **SSH password logins were still on.** `setup-vps.sh` wrote its settings to `99-hardening.conf`, which Hostinger's `50-cloud-init.conf` overrode, because `sshd` keeps the first value it reads. Fixed on the VPS by renaming the file to `00-hardening.conf`; the server now offers `publickey` only.
+- `setup-vps.sh` now writes `00-hardening.conf`, removes any old `99-` file, and fails unless `sshd -T` shows password and root logins off.
+- Installed the GitHub Actions key for `deploy`. `docs/VPS-ACCESS.md` Part 3 now uses `ssh -t` with the key in the command, because the old piped version couldn't prompt for `sudo`.
+
 ---
 
 ## Lessons

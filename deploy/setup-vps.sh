@@ -83,13 +83,21 @@ ufw --force enable
 
 echo "==> SSH hardening"
 if [ -s "/home/$ADMIN_USER/.ssh/authorized_keys" ]; then
-  cat > /etc/ssh/sshd_config.d/99-hardening.conf <<CONF
+  # sshd keeps the first value it reads and loads these files in name order, so 00- beats the
+  # provider's 50-cloud-init.conf (which turns password logins back on). 99- was silently overridden.
+  rm -f /etc/ssh/sshd_config.d/99-hardening.conf
+  cat > /etc/ssh/sshd_config.d/00-hardening.conf <<CONF
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
 AllowUsers $ADMIN_USER $DEPLOY_USER
 CONF
   sshd -t
+  # check the settings sshd actually uses, not just what the file says
+  if ! sshd -T | grep -qx 'passwordauthentication no' || ! sshd -T | grep -qx 'permitrootlogin no'; then
+    echo "    ERROR: another file in /etc/ssh/sshd_config.d/ still allows password or root logins" >&2
+    exit 1
+  fi
   systemctl reload ssh
   echo "    Root and password logins are off. From now on: ssh $ADMIN_USER@<vps-ip>"
 else

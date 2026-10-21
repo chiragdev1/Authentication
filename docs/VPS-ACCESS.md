@@ -231,10 +231,10 @@ This is the key the CI/CD pipeline uses to deploy. It logs in as `deploy`, which
 ssh-keygen -t ed25519 -f ~/.ssh/ckauth_deploy -N "" -C "github-actions-deploy"
 ```
 
-Copy the public key to the `deploy` user. You can't log in as `deploy` yet, so go through `chirag`:
+Copy the public key to the `deploy` user. You can't log in as `deploy` yet, so go through `chirag`. `-t` gives `sudo` a terminal to ask for your password. The key goes inside the command, not through a pipe, because a piped key would be read as the password:
 
 ```bash
-cat ~/.ssh/ckauth_deploy.pub | ssh vps "sudo tee -a /home/deploy/.ssh/authorized_keys > /dev/null"
+ssh -t vps "echo '$(cat ~/.ssh/ckauth_deploy.pub)' | sudo tee -a /home/deploy/.ssh/authorized_keys > /dev/null"
 ssh -i ~/.ssh/ckauth_deploy deploy@203.0.113.10 docker ps      # should print an empty table
 ```
 
