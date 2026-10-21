@@ -1,47 +1,67 @@
 import { useState } from 'react'
-import { api } from '../lib/api.ts'
-import { useAction } from '../lib/use-action.ts'
-import { Alert, AuthPage, Button, Field, TextLink } from '../components/ui.tsx'
+import { Link } from 'react-router'
+import { MailCheck } from 'lucide-react'
+import { api } from '@/lib/api.ts'
+import { useForm } from '@/lib/use-form.ts'
+import { validateEmail, validateFirstName, validateLastName, validateNewPassword } from '@/lib/validation.ts'
+import { AuthShell } from '@/components/auth-shell.tsx'
+import { FormAlert, PasswordField, TextField } from '@/components/form.tsx'
+import { Button } from '@/components/ui/button.tsx'
 
 export function SignUp() {
   const [sentTo, setSentTo] = useState<string | null>(null)
 
-  const { pending, error, onSubmit } = useAction(async form => {
-    const email = String(form.get('email'))
-    const lastName = String(form.get('lastName')).trim()
-    await api('/auth/sign-up', {
-      method: 'POST',
-      body: {
-        firstName: String(form.get('firstName')).trim(),
-        lastName: lastName || null,
-        email,
-        password: String(form.get('password')),
-      },
-    })
-    setSentTo(email)
+  const form = useForm({
+    initial: { firstName: '', lastName: '', email: '', password: '' },
+    validate: { firstName: validateFirstName, lastName: validateLastName, email: validateEmail, password: validateNewPassword },
+    submit: async values => {
+      const lastName = values.lastName.trim()
+      await api('/auth/sign-up', {
+        method: 'POST',
+        body: { firstName: values.firstName.trim(), lastName: lastName || null, email: values.email.trim(), password: values.password },
+      })
+      setSentTo(values.email.trim())
+    },
   })
 
   // the api answers the same for new and existing emails, so this screen must too
   if(sentTo) {
     return (
-      <AuthPage title="Check your inbox" subtitle={<>We've sent a message to <strong>{sentTo}</strong>. Follow the link in it to finish creating your account.</>}>
-        <Alert kind="info">The link expires in 15 minutes. You'll need the password you just chose to confirm it.</Alert>
-      </AuthPage>
+      <AuthShell
+        eyebrow="Orders dispatched"
+        title="Check your inbox"
+        subtitle={<>We've sent a message to <strong className="break-all text-foreground">{sentTo}</strong>. Follow the link in it to finish enlisting.</>}
+        footer={<>Wrong address? <button type="button" onClick={() => setSentTo(null)} className="font-medium text-primary hover:underline">Start again</button></>}
+      >
+        <div className="flex flex-col items-center gap-5 text-center">
+          <span className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <MailCheck className="size-7" />
+          </span>
+          <FormAlert kind="info">The link expires in 15 minutes. You'll confirm it with the password you just chose, and then you're straight in.</FormAlert>
+        </div>
+      </AuthShell>
     )
   }
 
   return (
-    <AuthPage title="Create your account" footer={<>Already have an account? <TextLink to="/sign-in">Sign in</TextLink></>}>
-      <form onSubmit={onSubmit} className="space-y-4">
-        {error && <Alert kind="error">{error}</Alert>}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="First name" name="firstName" autoComplete="given-name" required minLength={2} maxLength={45} />
-          <Field label="Last name" name="lastName" autoComplete="family-name" maxLength={45} />
+    <AuthShell
+      eyebrow="104th Cadet Corps · Enlistment"
+      title="Create your account"
+      subtitle="Join in under a minute. We'll verify your email before anything else."
+      footer={<>Already enlisted? <Link to="/sign-in" className="font-medium text-primary hover:underline">Sign in</Link></>}
+    >
+      <form ref={form.formRef} onSubmit={form.onSubmit} noValidate className="space-y-5">
+        {form.formError && <FormAlert kind="error">{form.formError}</FormAlert>}
+        <div className="grid gap-5 sm:grid-cols-2">
+          <TextField label="First name" autoComplete="given-name" error={form.errors.firstName} {...form.register('firstName')} />
+          <TextField label="Last name" optional autoComplete="family-name" error={form.errors.lastName} {...form.register('lastName')} />
         </div>
-        <Field label="Email" name="email" type="email" autoComplete="email" required />
-        <Field label="Password" name="password" type="password" autoComplete="new-password" required minLength={6} maxLength={72} hint="6 to 72 characters." />
-        <Button type="submit" loading={pending} className="w-full">Create account</Button>
+        <TextField label="Email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" error={form.errors.email} {...form.register('email')} />
+        <PasswordField label="Password" autoComplete="new-password" showStrength error={form.errors.password} {...form.register('password')} />
+        <Button type="submit" size="lg" disabled={form.pending} className="font-display w-full tracking-[0.2em] uppercase">
+          {form.pending ? 'Enlisting…' : 'Enlist'}
+        </Button>
       </form>
-    </AuthPage>
+    </AuthShell>
   )
 }

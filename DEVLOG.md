@@ -110,6 +110,16 @@ Newest entries go at the bottom, under a dated heading.
 - Merged to `main`: api, db and redis deployed and are healthy on the VPS.
 - **The web container failed its health check.** Caddy's binary has a file capability that `cap_drop: [ALL]` forbids, so it couldn't start (`operation not permitted`). The web image now removes the capability at build time, and its tmpfs folders belong to the non-root user. Both checked on the VPS under production restrictions before committing.
 
+## 21 Oct 2026 · Web redesign and sign-in on verify
+- **Verifying an email now signs the user in.** The link plus the sign-up password is the same proof sign-in asks for, so `/auth/verify-email/:token` sets the session cookies. The new refresh token is saved in the same conditional `UPDATE` that marks the email verified, so a request that loses a race gets no session.
+- Rebuilt the web app on shadcn/ui (Radix + Tailwind v4 tokens) with an original "walls" theme, a self-drawn crest and a new landing page.
+- Light, dark and system themes. `public/theme-init.js` applies the theme before React loads; it's a file because the CSP blocks inline scripts. Fonts are self-hosted for the same reason.
+- Forms now validate inline (mirroring the Zod models), show friendly messages instead of raw Zod text, have a show-password button, and check new passwords against a requirement list and a strength meter. New passwords need 8+ characters with a letter and a number on the client; the API still accepts 6.
+- Compared three looks side by side with a temporary dev-only design lab, then chose **Dusk**: a Cinzel display face, ember and steel colours, and pill buttons. The two losing looks and their fonts are gone; the lab stays as a dev tool for future redesigns (its panel hides until there are two or more looks).
+- **The hero is plain shadcn, no illustrations.** A sky-and-walls SVG scene with a giant was tried and dropped as too heavy. The hero now pairs the headline with a card that walks a `GET /auth/me` through the checks `authenticateToken` really runs (authentication: cookie, token, account → 401; authorization: verified email → 403). The auth side panel, closing call to action and 404 use the same faint CSS grid. The theme control is a one-click toggle.
+- Subtle nods in the copy: walls Maria/Rose/Sina, "104th Cadet Corps", "Year 850", "titan at the gate" in the 429 log line, and 心臓を捧げよ in the footer. No copyrighted art or logos are used.
+- **The shadcn CLI imported `cn` from npm** instead of `@/lib/utils`, and installed an unrelated package called `cn`. Removed it and fixed the imports.
+
 ---
 
 ## Lessons

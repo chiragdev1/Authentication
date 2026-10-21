@@ -175,8 +175,8 @@ deploy/edge/                    # Shared Caddy proxy for every site on the VPS (
 ## How authentication works
 
 1. **Sign up.** The user is created as *unverified* and receives a verification email.
-2. **Verify.** The email link opens your frontend's `/verify-email?token=…` page. The user enters their password, and the frontend sends it to the API with the token. Asking for the password proves that the person who owns the inbox is the same person who signed up.
-3. **Sign in.** Only verified users can sign in. The API sets two `httpOnly` cookies:
+2. **Verify.** The email link opens your frontend's `/verify-email?token=…` page. The user enters their password, and the frontend sends it to the API with the token. Asking for the password proves that the person who owns the inbox is the same person who signed up, so a successful verification also signs the user in.
+3. **Sign in.** Only verified users can sign in. Signing in (or verifying) sets two `httpOnly` cookies:
    - `access_token`: short-lived, sent with every request.
    - `refresh_token`: longer-lived, used only to get a new access token.
 4. **Refresh.** When the access token expires, call `/auth/refresh`. Both tokens are replaced, and the old refresh token stops working.

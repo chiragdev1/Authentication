@@ -1,9 +1,16 @@
-import { useRef, useState, type ChangeEvent } from 'react'
-import { useNavigate } from 'react-router'
-import { api, errorMessage } from '../lib/api.ts'
-import { useAuth } from '../lib/auth.tsx'
-import { useAction } from '../lib/use-action.ts'
-import { Alert, Button, Card, Field } from '../components/ui.tsx'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router'
+import { Camera, LogOut, ShieldCheck, X } from 'lucide-react'
+import { api } from '@/lib/api.ts'
+import { useAuth } from '@/lib/auth.tsx'
+import { useForm } from '@/lib/use-form.ts'
+import { describeError, validateConfirmation, validateExistingPassword, validateNewPassword } from '@/lib/validation.ts'
+import { FormAlert, PasswordField } from '@/components/form.tsx'
+import { UserAvatar } from '@/components/user-avatar.tsx'
+import { Badge } from '@/components/ui/badge.tsx'
+import { Button } from '@/components/ui/button.tsx'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.tsx'
+import { Separator } from '@/components/ui/separator.tsx'
 
 // mirrors the api's limits so obvious mistakes fail instantly; the api still checks the real bytes
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024
@@ -12,6 +19,14 @@ const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 export function Dashboard() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [welcome, setWelcome] = useState(() => Boolean((location.state as { welcome?: boolean } | null)?.welcome))
+
+  // drop the flag from history, so a reload or the back button doesn't welcome them twice
+  useEffect(() => {
+    if(welcome) navigate(location.pathname, { replace: true, state: null })
+  }, [])
+
   if(!user) return null
 
   async function handleSignOut() {
@@ -20,16 +35,34 @@ export function Dashboard() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 px-4 py-12">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Hi, {user.firstName}</h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">Manage your profile and security.</p>
+    <div className="relative flex-1">
+      <div aria-hidden className="bg-wall pointer-events-none absolute inset-x-0 top-0 h-72" />
+      <div className="relative mx-auto max-w-4xl space-y-6 px-4 py-10 sm:px-6 sm:py-14">
+        {welcome && (
+          <div className="dossier flex items-start gap-4 rounded-2xl border border-success/40 bg-success/10 p-5 animate-in fade-in slide-in-from-top-2">
+            <ShieldCheck className="mt-0.5 size-6 shrink-0 text-success" />
+            <div className="flex-1">
+              <p className="font-display text-lg font-semibold">Enlistment complete</p>
+              <p className="text-sm text-muted-foreground">Your email is verified and you're signed in. Welcome inside the walls, {user.firstName}. Your heart is dedicated.</p>
+            </div>
+            <button type="button" onClick={() => setWelcome(false)} aria-label="Dismiss" className="rounded p-1 text-muted-foreground hover:text-foreground">
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="eyebrow">Garrison HQ · Command post</p>
+            <h1 className="font-display mt-1 text-4xl font-semibold">Hi, {user.firstName}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Manage your profile and keep your account secure.</p>
+          </div>
+          <Button variant="outline" onClick={handleSignOut}><LogOut />Sign out</Button>
         </div>
-        <Button variant="secondary" onClick={handleSignOut}>Sign out</Button>
+
+        <ProfileCard />
+        <ChangePasswordCard />
       </div>
-      <ProfileCard />
-      <ChangePasswordCard />
     </div>
   )
 }
@@ -40,8 +73,6 @@ function ProfileCard() {
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<{ kind: 'error' | 'success', text: string } | null>(null)
   if(!user) return null
-
-  const initials = `${user.firstName[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase()
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -64,73 +95,92 @@ function ProfileCard() {
       await reloadUser()
       setMessage({ kind: 'success', text: 'Profile picture updated' })
     } catch (error) {
-      setMessage({ kind: 'error', text: errorMessage(error) })
+      setMessage({ kind: 'error', text: describeError(error).formError ?? 'Upload failed, please try again' })
     } finally {
       setUploading(false)
     }
   }
 
   return (
-    <Card>
-      <h2 className="font-semibold">Profile</h2>
-      <div className="mt-5 flex flex-col gap-6 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-4">
-          {user.avatarUrl ? (
-            <img src={user.avatarUrl} alt="" className="size-20 rounded-full object-cover ring-1 ring-zinc-200 dark:ring-zinc-800" />
-          ) : (
-            <div className="flex size-20 items-center justify-center rounded-full bg-indigo-100 text-xl font-semibold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">{initials}</div>
-          )}
-          <div>
+    <Card className="dossier">
+      <CardHeader>
+        <CardTitle className="font-display text-lg font-semibold">Service record</CardTitle>
+        <CardDescription>Your profile as others see it.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+          <div className="relative self-start">
+            <UserAvatar user={user} className="size-24 text-2xl" />
             <input ref={fileInput} type="file" accept={AVATAR_TYPES.join(',')} className="hidden" onChange={handleFile} />
-            <Button variant="secondary" loading={uploading} onClick={() => fileInput.current?.click()}>
-              {user.avatarUrl ? 'Change picture' : 'Upload picture'}
+            <Button
+              size="icon-sm"
+              variant="secondary"
+              disabled={uploading}
+              onClick={() => fileInput.current?.click()}
+              aria-label={user.avatarUrl ? 'Change picture' : 'Upload picture'}
+              className="absolute -right-1 -bottom-1 rounded-full shadow-md ring-2 ring-card"
+            >
+              <Camera className={uploading ? 'animate-pulse' : undefined} />
             </Button>
-            <p className="mt-1.5 text-xs text-zinc-500">JPEG, PNG or WebP, up to 2 MB.</p>
           </div>
+          <dl className="grid flex-1 gap-4 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="font-display text-xs tracking-[0.2em] text-muted-foreground uppercase">Name</dt>
+              <dd className="mt-1 font-medium">{[user.firstName, user.lastName].filter(Boolean).join(' ')}</dd>
+            </div>
+            <div>
+              <dt className="font-display text-xs tracking-[0.2em] text-muted-foreground uppercase">Email</dt>
+              <dd className="mt-1 flex flex-wrap items-center gap-2 font-medium break-all">
+                {user.email}
+                {user.emailVerified && <Badge className="border-success/40 bg-success/10 text-success" variant="outline"><ShieldCheck />Verified</Badge>}
+              </dd>
+            </div>
+          </dl>
         </div>
-        <dl className="grid flex-1 grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-          <dt className="text-zinc-500">Name</dt>
-          <dd className="font-medium">{[user.firstName, user.lastName].filter(Boolean).join(' ')}</dd>
-          <dt className="text-zinc-500">Email</dt>
-          <dd className="flex flex-wrap items-center gap-2 font-medium break-all">
-            {user.email}
-            {user.emailVerified && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">Verified</span>}
-          </dd>
-        </dl>
-      </div>
-      {message && <div className="mt-4"><Alert kind={message.kind}>{message.text}</Alert></div>}
+        <p className="text-xs text-muted-foreground">Profile picture: JPEG, PNG or WebP, up to 2 MB.</p>
+        {message && <FormAlert kind={message.kind}>{message.text}</FormAlert>}
+      </CardContent>
     </Card>
   )
 }
 
 function ChangePasswordCard() {
   const [done, setDone] = useState(false)
-  const formRef = useRef<HTMLFormElement>(null)
 
-  const { pending, error, onSubmit } = useAction(async form => {
-    const currentPassword = String(form.get('currentPassword'))
-    const newPassword = String(form.get('newPassword'))
-    if(newPassword !== form.get('confirmPassword')) {
-      throw new Error('The new passwords don\'t match')
-    }
-    setDone(false)
-    await api('/auth/change-password', { method: 'POST', body: { currentPassword, newPassword }, authed: true })
-    setDone(true)
-    formRef.current?.reset()
+  const form = useForm({
+    initial: { currentPassword: '', newPassword: '', confirmPassword: '' },
+    validate: {
+      currentPassword: validateExistingPassword,
+      newPassword: (value, values) => validateNewPassword(value) ?? (value === values.currentPassword ? 'New password must be different from the current one' : undefined),
+      confirmPassword: (value, values) => validateConfirmation(value, values.newPassword),
+    },
+    submit: async values => {
+      setDone(false)
+      await api('/auth/change-password', { method: 'POST', body: { currentPassword: values.currentPassword, newPassword: values.newPassword }, authed: true })
+      setDone(true)
+      form.reset()
+    },
   })
 
   return (
     <Card>
-      <h2 className="font-semibold">Change password</h2>
-      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">Other devices will be signed out. This one stays signed in.</p>
-      <form ref={formRef} onSubmit={onSubmit} className="mt-5 max-w-sm space-y-4">
-        {error && <Alert kind="error">{error}</Alert>}
-        {done && !error && <Alert kind="success">Password changed</Alert>}
-        <Field label="Current password" name="currentPassword" type="password" autoComplete="current-password" required />
-        <Field label="New password" name="newPassword" type="password" autoComplete="new-password" required minLength={6} maxLength={72} />
-        <Field label="Confirm new password" name="confirmPassword" type="password" autoComplete="new-password" required minLength={6} maxLength={72} />
-        <Button type="submit" loading={pending}>Update password</Button>
-      </form>
+      <CardHeader>
+        <CardTitle className="font-display text-lg font-semibold">Change password</CardTitle>
+        <CardDescription>Other devices will be signed out. This one stays signed in.</CardDescription>
+      </CardHeader>
+      <Separator />
+      <CardContent>
+        <form ref={form.formRef} onSubmit={form.onSubmit} noValidate className="max-w-md space-y-5">
+          {form.formError && <FormAlert kind="error">{form.formError}</FormAlert>}
+          {done && !form.formError && <FormAlert kind="success">Password changed. Every other session has been signed out.</FormAlert>}
+          <PasswordField label="Current password" autoComplete="current-password" error={form.errors.currentPassword} {...form.register('currentPassword')} />
+          <PasswordField label="New password" autoComplete="new-password" showStrength error={form.errors.newPassword} {...form.register('newPassword')} />
+          <PasswordField label="Confirm new password" autoComplete="new-password" error={form.errors.confirmPassword} {...form.register('confirmPassword')} />
+          <Button type="submit" disabled={form.pending} className="font-display tracking-[0.2em] uppercase">
+            {form.pending ? 'Updating…' : 'Update password'}
+          </Button>
+        </form>
+      </CardContent>
     </Card>
   )
 }

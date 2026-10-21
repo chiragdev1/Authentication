@@ -1,42 +1,52 @@
-import { useNavigate } from 'react-router'
-import { api } from '../lib/api.ts'
-import { useAuth } from '../lib/auth.tsx'
-import { useAction } from '../lib/use-action.ts'
-import { useUrlToken } from '../lib/use-url-token.ts'
-import { Alert, AuthPage, Button, Field, TextLink } from '../components/ui.tsx'
+import { Link, useNavigate } from 'react-router'
+import { api } from '@/lib/api.ts'
+import { useAuth } from '@/lib/auth.tsx'
+import { useForm } from '@/lib/use-form.ts'
+import { useUrlToken } from '@/lib/use-url-token.ts'
+import { validateConfirmation, validateNewPassword } from '@/lib/validation.ts'
+import { AuthShell } from '@/components/auth-shell.tsx'
+import { FormAlert, PasswordField } from '@/components/form.tsx'
+import { Button } from '@/components/ui/button.tsx'
+
+const requestNewLink = <Link to="/forgot-password" className="font-medium text-primary hover:underline">Request a new link</Link>
 
 export function ResetPassword() {
   const token = useUrlToken()
   const navigate = useNavigate()
   const { signOut } = useAuth()
 
-  const { pending, error, onSubmit } = useAction(async form => {
-    const newPassword = String(form.get('newPassword'))
-    if(newPassword !== form.get('confirmPassword')) {
-      throw new Error('The passwords don\'t match')
-    }
-    await api(`/auth/reset-password/${encodeURIComponent(token!)}`, { method: 'POST', body: { newPassword } })
-    // the reset revoked every session; clear this browser's cookies too
-    await signOut()
-    navigate('/sign-in', { replace: true, state: { notice: 'Password updated. Sign in with your new password.' } })
+  const form = useForm({
+    initial: { newPassword: '', confirmPassword: '' },
+    validate: {
+      newPassword: validateNewPassword,
+      confirmPassword: (value, values) => validateConfirmation(value, values.newPassword),
+    },
+    submit: async values => {
+      await api(`/auth/reset-password/${encodeURIComponent(token!)}`, { method: 'POST', body: { newPassword: values.newPassword } })
+      // the reset revoked every session; clear this browser's cookies too
+      await signOut()
+      navigate('/sign-in', { replace: true, state: { notice: 'Password updated. Sign in with your new password.' } })
+    },
   })
 
   if(!token) {
     return (
-      <AuthPage title="This link doesn't work" footer={<TextLink to="/forgot-password">Request a new link</TextLink>}>
-        <Alert kind="error">The reset link is missing its token. Open the link from your email again.</Alert>
-      </AuthPage>
+      <AuthShell eyebrow="Gate sealed" title="This link doesn't work" footer={requestNewLink}>
+        <FormAlert kind="error">The reset link is missing its token. Open the link from your email again.</FormAlert>
+      </AuthShell>
     )
   }
 
   return (
-    <AuthPage title="Choose a new password" subtitle="You'll be signed out on every device." footer={<TextLink to="/forgot-password">Request a new link</TextLink>}>
-      <form onSubmit={onSubmit} className="space-y-4">
-        {error && <Alert kind="error">{error}</Alert>}
-        <Field label="New password" name="newPassword" type="password" autoComplete="new-password" required minLength={6} maxLength={72} hint="6 to 72 characters." />
-        <Field label="Confirm new password" name="confirmPassword" type="password" autoComplete="new-password" required minLength={6} maxLength={72} />
-        <Button type="submit" loading={pending} className="w-full">Update password</Button>
+    <AuthShell eyebrow="Recover access" title="Choose a new password" subtitle="You'll be signed out on every device, including this one." footer={requestNewLink}>
+      <form ref={form.formRef} onSubmit={form.onSubmit} noValidate className="space-y-5">
+        {form.formError && <FormAlert kind="error">{form.formError}</FormAlert>}
+        <PasswordField label="New password" autoComplete="new-password" showStrength autoFocus error={form.errors.newPassword} {...form.register('newPassword')} />
+        <PasswordField label="Confirm new password" autoComplete="new-password" error={form.errors.confirmPassword} {...form.register('confirmPassword')} />
+        <Button type="submit" size="lg" disabled={form.pending} className="font-display w-full tracking-[0.2em] uppercase">
+          {form.pending ? 'Updating…' : 'Update password'}
+        </Button>
       </form>
-    </AuthPage>
+    </AuthShell>
   )
 }

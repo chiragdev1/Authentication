@@ -1,45 +1,62 @@
-import { useLocation, useNavigate } from 'react-router'
-import { api, ApiRequestError } from '../lib/api.ts'
-import { useAuth } from '../lib/auth.tsx'
-import { useAction } from '../lib/use-action.ts'
-import { Alert, AuthPage, Button, Field, TextLink } from '../components/ui.tsx'
+import { Link, useLocation, useNavigate } from 'react-router'
+import { api, ApiRequestError } from '@/lib/api.ts'
+import { useAuth } from '@/lib/auth.tsx'
+import { useForm } from '@/lib/use-form.ts'
+import { validateEmail, validateExistingPassword } from '@/lib/validation.ts'
+import { AuthShell } from '@/components/auth-shell.tsx'
+import { FormAlert, PasswordField, TextField } from '@/components/form.tsx'
+import { Button } from '@/components/ui/button.tsx'
 
 export function SignIn() {
   const navigate = useNavigate()
   const location = useLocation()
   const { reloadUser } = useAuth()
-  const notice = (location.state as { notice?: string } | null)?.notice
+  const state = location.state as { notice?: string, from?: string } | null
 
-  const { pending, error, onSubmit } = useAction(async form => {
-    try {
-      await api('/auth/sign-in', {
-        method: 'POST',
-        body: { email: String(form.get('email')), password: String(form.get('password')) },
-      })
-    } catch (caught) {
-      // 403 = right password, unverified email; the api has already re-sent the link if the old one expired
-      if(caught instanceof ApiRequestError && caught.status === 403) {
-        throw new Error('Your email isn\'t verified yet. Check your inbox for the verification link.')
+  const form = useForm({
+    initial: { email: '', password: '' },
+    validate: { email: validateEmail, password: validateExistingPassword },
+    submit: async values => {
+      try {
+        await api('/auth/sign-in', { method: 'POST', body: { email: values.email.trim(), password: values.password } })
+      } catch (caught) {
+        // 403 = right password, unverified email; the api has already re-sent the link if the old one expired
+        if(caught instanceof ApiRequestError && caught.status === 403) {
+          throw new Error('Your email isn\'t verified yet. We\'ve sent a fresh link if the last one expired, so check your inbox.')
+        }
+        // the api can't say which half was wrong without revealing who has an account, and neither should we
+        if(caught instanceof ApiRequestError && caught.status === 401) {
+          throw new Error('That email and password don\'t match. Check both and try again.')
+        }
+        throw caught
       }
-      throw caught
-    }
-    await reloadUser()
-    const from = (location.state as { from?: string } | null)?.from
-    navigate(from ?? '/dashboard', { replace: true })
+      await reloadUser()
+      navigate(state?.from ?? '/dashboard', { replace: true })
+    },
   })
 
   return (
-    <AuthPage title="Welcome back" subtitle="Sign in to your account." footer={<>New here? <TextLink to="/sign-up">Create an account</TextLink></>}>
-      <form onSubmit={onSubmit} className="space-y-4">
-        {notice && !error && <Alert kind="success">{notice}</Alert>}
-        {error && <Alert kind="error">{error}</Alert>}
-        <Field label="Email" name="email" type="email" autoComplete="email" required />
-        <Field label="Password" name="password" type="password" autoComplete="current-password" required minLength={6} />
-        <div className="flex justify-end text-sm">
-          <TextLink to="/forgot-password">Forgot password?</TextLink>
-        </div>
-        <Button type="submit" loading={pending} className="w-full">Sign in</Button>
+    <AuthShell
+      eyebrow="Return to post"
+      title="Welcome back"
+      subtitle="Sign in to continue to your dashboard."
+      footer={<>New recruit? <Link to="/sign-up" className="font-medium text-primary hover:underline">Create an account</Link></>}
+    >
+      <form ref={form.formRef} onSubmit={form.onSubmit} noValidate className="space-y-5">
+        {state?.notice && !form.formError && <FormAlert kind="success">{state.notice}</FormAlert>}
+        {form.formError && <FormAlert kind="error">{form.formError}</FormAlert>}
+        <TextField label="Email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" error={form.errors.email} {...form.register('email')} />
+        <PasswordField
+          label="Password"
+          autoComplete="current-password"
+          error={form.errors.password}
+          action={<Link to="/forgot-password" className="text-[0.8rem] font-medium text-primary hover:underline">Forgot password?</Link>}
+          {...form.register('password')}
+        />
+        <Button type="submit" size="lg" disabled={form.pending} className="font-display w-full tracking-[0.2em] uppercase">
+          {form.pending ? 'Opening the gate…' : 'Sign in'}
+        </Button>
       </form>
-    </AuthPage>
+    </AuthShell>
   )
 }
