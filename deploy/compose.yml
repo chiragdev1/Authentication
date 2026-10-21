@@ -115,7 +115,8 @@ services:
     cap_drop: [ALL]
     read_only: true
     # caddy wants somewhere to write its runtime state, even as a plain file server
-    tmpfs: [/data, /config]
+    # owned by the image's non-root user (65534), or caddy can't write there
+    tmpfs: ["/data:uid=65534,gid=65534", "/config:uid=65534,gid=65534"]
     deploy:
       resources:
         limits: {cpus: "0.25", memory: 64M}
