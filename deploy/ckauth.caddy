@@ -5,12 +5,22 @@ ckauth.chiragdev.com {
 
 	# /api/auth/sign-in -> ckauth-api:8080/auth/sign-in, same rewrite as the vite dev proxy
 	handle_path /api/* {
-		reverse_proxy ckauth-api:8080
+		reverse_proxy ckauth-api:8080 {
+			# idle upstream connections close well before node's keepAliveTimeout (125 s), so caddy never reuses a dead one
+			transport http {
+				keepalive 60s
+			}
+		}
 	}
 
 	# everything else is the SPA; the web container sets cache headers and the index.html fallback
 	handle {
-		reverse_proxy ckauth-web:8080
+		reverse_proxy ckauth-web:8080 {
+			# same idea: close idle connections before the web container's own idle timeout (5 min) does
+			transport http {
+				keepalive 60s
+			}
+		}
 	}
 
 	header {
