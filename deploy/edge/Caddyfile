@@ -1,0 +1,7 @@
+{
+	# used for Let's Encrypt expiry notices
+	email {$ACME_EMAIL:admin@chiragdev.com}
+}
+
+# one file per project, e.g. sites/ckauth.caddy, sites/portfolio.caddy
+import sites/*.caddy

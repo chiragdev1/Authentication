@@ -1,0 +1,32 @@
+# CKAuth site, copied to /opt/edge/sites/ckauth.caddy by every deploy
+# ckauth-api and ckauth-web are network aliases on the shared `edge` network (see deploy/compose.yml)
+ckauth.chiragdev.com {
+	encode zstd gzip
+
+	# /api/auth/sign-in -> ckauth-api:8080/auth/sign-in, same rewrite as the vite dev proxy
+	handle_path /api/* {
+		reverse_proxy ckauth-api:8080
+	}
+
+	# everything else is the SPA; the web container sets cache headers and the index.html fallback
+	handle {
+		reverse_proxy ckauth-web:8080
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		# email links carry tokens in the query string; never leak them to other sites
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# avatars are served from imagekit; everything else is same-origin
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https://ik.imagekit.io; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
