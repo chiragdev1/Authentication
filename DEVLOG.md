@@ -1,4 +1,4 @@
-# Dev Log: Authentication Service
+# Dev Log: CKAuth
 
 **Stack:** TypeScript · Express 5 · PostgreSQL 17 (Docker) · Drizzle ORM · Zod · JWT · bcrypt · Resend · Multer + ImageKit
 
@@ -55,6 +55,24 @@ Newest entries go at the bottom, under a dated heading.
 - Added `README.md` (setup, environment variables, how auth works, known limitations), `docs/API.md` (every endpoint with requests, responses, errors and typical flows for frontend developers) and `CLAUDE.md` (conventions and security rules for AI assistants).
 - Writing the docs turned up two gaps: **no CORS configuration**, and **malformed JSON returns 500** instead of 400.
 
+## 21 Oct 2026 · Frontend, hosting and CI/CD
+- **CKAuth web app** in `frontend/`: React 19 + Vite + Tailwind 4 + React Router. Pages for every flow (sign-up, verify with password, sign-in, forgot/reset, dashboard with avatar upload and change password).
+  - One `api()` wrapper: every call goes to `/api/...` with cookies, and protected calls refresh once on 401, with a single refresh shared by concurrent requests.
+  - Tokens from email links are read once, then removed from the address bar and history.
+- **Production layout: one origin, `ckauth.chiragdev.com`.** `/api/*` goes to Express and everything else to the SPA. The cookies stay first-party and CORS isn't needed. Security headers: CSP, HSTS, and `Referrer-Policy: no-referrer` so email tokens never leak.
+- **Shared VPS.** The Hostinger KVM 2 will host other sites too, so a shared **edge Caddy** (`deploy/edge/`) owns 80/443 and imports one site file per project. CKAuth's `db` is on a private network, and only `api`/`web` join the shared `edge` network, under project-prefixed aliases.
+- **Docker Compose stack** (`deploy/compose.yml`): Postgres with no public port, the API, and the web container. Migrations run with Drizzle's runtime migrator (`src/db/migrate.ts`), so `drizzle-kit` stays out of the image.
+- **Independent deploys.** `api.yml` and `web.yml` run on their own paths (build check on PRs; on `main`, push to GHCR tagged with the SHA) and share `deploy.yml`, which runs `deploy/deploy.sh <service> <sha>` over SSH with a pinned host key. Steps: migrate (api only) → restart that service only → wait for health → record the tag → validate and reload the edge → smoke test. Running a workflow by hand with a SHA rolls back that service alone.
+- `deploy/setup-vps.sh` prepares a fresh Ubuntu VPS: Docker, ufw, fail2ban and unattended upgrades. It creates two users, `chirag` (admin, sudo with a password) and `deploy` (CI only, no sudo), and turns on key-only SSH with root login off. `docs/VPS-ACCESS.md` is a first-time walkthrough for SSH keys, the `ssh vps` alias, a read-only GitHub deploy key on the VPS, and the CI key.
+- **Containers run without root powers:** the API as `node` and the web container as `nobody` on :8080. All have `cap_drop: ALL`, `no-new-privileges` and read-only filesystems. The edge keeps only `NET_BIND_SERVICE`.
+- The domain moved to **`ckauth.chiragdev.com`**.
+- **Renamed the product to CKAuth** (emails, package names, docs). **`EMAIL_FROM` is now required:** there's no longer a fallback to a hard-coded `dsaden.com` address, so changing the mail domain is purely a config change (documented step by step).
+- `deploy/backup.sh`: nightly `pg_dump` with 14-day retention. `/opt/ckauth` and `/opt/edge` are shared by `chirag` and `deploy` through the `deploy` group (setgid folders), so both can work there.
+- `docs/DEPLOYMENT.md` rewritten as a first-timer's guide: 10 setup steps, each with what/why/check, then operations (rollback, settings, changing the email domain, secret rotation, migrations, restore, adding sites) and troubleshooting tables.
+- Tested end to end through the real frontend client and the Vite `/api` proxy: 24 checks, including 3 concurrent 401s sharing a single refresh. The runtime migrator built the full schema on an empty database.
+- Local fix: `main`'s dev database had picked up two migrations from the `microservice-architecture` branch (`sessions` table, `refresh_token` dropped). They were rolled back by hand.
+- The API now sets `trust proxy` (so `req.ip` is the real client behind Caddy, ready for rate limiting) and drops `X-Powered-By`.
+
 ---
 
 ## Lessons
@@ -62,7 +80,8 @@ Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.m
 
 ## Next up
 - Rate limiting (design ready: Redis store, separate limits per IP and per email).
-- CORS configuration for a frontend on another origin.
+- First production deploy to the VPS (follow `docs/DEPLOYMENT.md`).
+- Move the sender to a CKAuth-branded domain (`EMAIL_FROM` only, see "Changing the email domain").
+- Automated off-server database backups.
 - Return 400, not 500, for malformed JSON bodies.
-- Frontend updates: a password field on the verify page and handling the 403 on sign-in.
 - Possibly let a password reset also mark the email as verified.

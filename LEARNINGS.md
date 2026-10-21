@@ -63,6 +63,10 @@ For the timeline, see [DEVLOG.md](DEVLOG.md).
 - **Migration generated but not applied.** The code expected columns the database didn't have yet. → `pnpm db:migrate` is part of "done".
 - **A typo in a route handler reached a commit** (`36e8342`).
   **Rule:** run `pnpm build` (the type check) before every commit.
+- **The backend `tsconfig` compiled the frontend.** With no `include`, `tsc` picked up `frontend/**`. → Added `"include": ["src"]`.
+  **Rule:** a package with its own `tsconfig` inside another package needs the outer one scoped explicitly.
+- **The first VPS script would have locked out the admin.** It turned off root SSH, but the only remaining user (`deploy`) had no `sudo`. → A separate `chirag` admin user with sudo; `deploy` is CI-only.
+  **Rule:** before turning off a way in, make sure another way in with the same powers exists, and test it in a new terminal.
 
 ## Process
 

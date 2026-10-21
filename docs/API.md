@@ -2,7 +2,8 @@
 
 Everything a client needs in order to use the Authentication API.
 
-- **Base URL (local):** `http://localhost:8080`
+- **Base URL (production):** `https://ckauth.chiragdev.com/api`. The proxy strips `/api`, so `POST https://ckauth.chiragdev.com/api/auth/sign-in` reaches `POST /auth/sign-in`.
+- **Base URL (local):** `http://localhost:8080`, or `http://localhost:3000/api` through the frontend's dev proxy.
 - **All endpoints** are under `/auth`.
 - **Request bodies** are JSON (`Content-Type: application/json`), except avatar upload, which is `multipart/form-data`.
 
@@ -60,7 +61,7 @@ What this means for a browser client:
 
 - Send cookies with every request: `fetch(url, { credentials: 'include' })`, or `axios` with `withCredentials: true`.
 - When a protected endpoint returns **`401`**, call [`POST /auth/refresh`](#post-authrefresh) once, then retry the original request. If refresh also fails, send the user to sign in.
-- **In production, the frontend and API must be on the same site**, e.g. `app.example.com` and `api.example.com`. The cookies are `SameSite=Lax`, so browsers won't send them from a different site. Locally, `localhost:3000` → `localhost:8080` works, because ports don't count as different sites.
+- **In production, the frontend and API must be on the same site.** The cookies are `SameSite=Lax`, so browsers won't send them from a different site. CKAuth uses one origin (`ckauth.chiragdev.com` + `/api`), so no CORS is involved. Locally, `localhost:3000` → `localhost:8080` works, because ports don't count as different sites.
 - **"Signed out" takes effect gradually.** When a session is ended (logout, password reset or change), its refresh token stops working immediately. An access token that was already issued keeps working until it expires (`ACCESS_TOKEN_EXPIRY`, e.g. up to 15 min).
 
 Endpoints marked **🔒 Auth required** need a valid `access_token` cookie, and the user's email must be verified.
