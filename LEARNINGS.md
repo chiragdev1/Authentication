@@ -65,6 +65,8 @@ For the timeline, see [DEVLOG.md](DEVLOG.md).
   **Rule:** run `pnpm build` (the type check) before every commit.
 - **The backend `tsconfig` compiled the frontend.** With no `include`, `tsc` picked up `frontend/**`. → Added `"include": ["src"]`.
   **Rule:** a package with its own `tsconfig` inside another package needs the outer one scoped explicitly.
+- **The frontend built locally but failed in CI.** `vite.config.ts` uses `process.env`, but only the root (API) package depended on `@types/node`; TypeScript found it in `../node_modules` on the laptop, while CI installs `frontend/` alone. → Added `@types/node` to `frontend/package.json`.
+  **Rule:** a nested package must declare every dependency itself; check with a clean `git archive` copy, installing only that package, as CI does.
 - **The first VPS script would have locked out the admin.** It turned off root SSH, but the only remaining user (`deploy`) had no `sudo`. → A separate `chirag` admin user with sudo; `deploy` is CI-only.
   **Rule:** before turning off a way in, make sure another way in with the same powers exists, and test it in a new terminal.
 - **SSH password logins stayed on after hardening.** The script wrote `PasswordAuthentication no` to `sshd_config.d/99-hardening.conf`, but `sshd` keeps the *first* value it reads, and Hostinger's `50-cloud-init.conf` loads earlier with `yes`. The server kept accepting passwords for `chirag`; it only came to light when a failed key login fell back to a password prompt. → Renamed to `00-hardening.conf`, and the script now checks `sshd -T` (the settings in force) and fails if they're wrong.

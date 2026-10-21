@@ -104,6 +104,7 @@ Newest entries go at the bottom, under a dated heading.
 - Started the shared edge Caddy on the VPS; it got the Let's Encrypt certificate for `ckauth.chiragdev.com` (502 until the first deploy, as expected).
 - **`ACME_EMAIL` was ignored.** Compose's `.env` only fills `${...}` in `compose.yml`; it isn't passed to the container, so Caddy fell back to `admin@chiragdev.com`. `deploy/edge/compose.yml` now passes it through, and the docs no longer suggest `you@example.com` (Let's Encrypt rejects it).
 - Decided on one shared sending domain, `mail.chiragdev.com`, for every project on the VPS (Resend's free plan verifies one domain); receiving stays off.
+- Fixed the failing `Web / check` CI job: `frontend/` now depends on `@types/node` itself instead of borrowing the API package's copy.
 
 ---
 
