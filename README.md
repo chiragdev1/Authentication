@@ -22,6 +22,8 @@ The repo also contains the **CKAuth web app** in [`frontend/`](frontend/) (React
   - Responses never reveal whether an email is registered.
   - Sign-in requires a verified email.
   - Database updates are safe when requests arrive at the same time.
+  - Rate limits per IP, per email and per user on every endpoint that checks a password, sends an email or uses a single-use token. They're shared through Redis.
+  - Password hashing runs off the main thread, so a burst of sign-ins can't stall everyone else.
 
 ## Tech stack
 
@@ -30,7 +32,8 @@ The repo also contains the **CKAuth web app** in [`frontend/`](frontend/) (React
 | Runtime | Node.js, TypeScript, Express 5 |
 | Database | PostgreSQL 17 (Docker), Drizzle ORM |
 | Validation | Zod |
-| Auth | JSON Web Tokens (`jsonwebtoken`), `bcryptjs` |
+| Auth | JSON Web Tokens (`jsonwebtoken`), native `bcrypt` (hashes off the main thread) |
+| Rate limiting | `express-rate-limit` with a Redis store (`rate-limit-redis`) |
 | Email | Resend |
 | File uploads | Multer (in-memory), ImageKit |
 | Frontend | React 19, Vite, Tailwind CSS 4, React Router |
@@ -44,7 +47,7 @@ The repo also contains the **CKAuth web app** in [`frontend/`](frontend/) (React
 
 - **Node.js 20+** (developed on Node 24)
 - **pnpm**: run `corepack enable` to use the version pinned in `package.json`
-- **Docker**, for the local PostgreSQL database
+- **Docker**, for the local PostgreSQL and Redis
 - A **Resend** API key (for emails) and an **ImageKit** private key (for avatars)
 
 ### 1. Install dependencies
@@ -75,6 +78,7 @@ Then open `.env` and fill in the values:
 | `EMAIL_FROM` | Yes | Sender address on a domain verified in Resend, e.g. `"CKAuth <no-reply@yourdomain.com>"`. **The server won't start without it.** No domain is hard-coded, so changing mail domains is a config change. |
 | `FRONTEND_URL` | Yes | Base URL of your frontend. Links in emails point here. Default: `http://localhost:3000`. |
 | `IMAGEKIT_PRIVATE_KEY` | For avatars | ImageKit private API key. The server starts without it; only avatar uploads fail. |
+| `REDIS_URL` | No | Redis for rate-limit counts, e.g. `redis://localhost:6379`. Without it, limits are counted in the process's memory (fine for one local process). |
 
 Generate strong JWT secrets with:
 
@@ -85,7 +89,7 @@ node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ### 3. Start the database and run migrations
 
 ```bash
-pnpm db:up        # starts PostgreSQL in Docker
+pnpm db:up        # starts PostgreSQL and Redis in Docker
 pnpm db:migrate   # creates the tables
 ```
 
@@ -121,7 +125,7 @@ Open `http://localhost:3000`. The Vite dev server proxies `/api/*` to the API on
 | `pnpm dev` | Compiles in watch mode and restarts the server on every change. |
 | `pnpm build` | Compiles TypeScript to `dist/`. Also the project's type check. |
 | `pnpm start` | Runs the compiled server from `dist/`. |
-| `pnpm db:up` / `pnpm db:down` | Starts / stops the PostgreSQL container. |
+| `pnpm db:up` / `pnpm db:down` | Starts / stops the PostgreSQL and Redis containers. |
 | `pnpm db:generate` | Creates a new migration after you change `src/db/schema.ts`. |
 | `pnpm db:migrate` | Applies pending migrations to the database. |
 | `pnpm db:migrate:prod` | Applies migrations with Drizzle's runtime migrator (`dist/db/migrate.js`); used by deploys. |
@@ -197,7 +201,6 @@ Two consequences:
 
 These are planned but not done yet:
 
-- **No rate limiting.** Put the API behind a proxy or firewall that limits requests until this is added.
 - **No CORS configuration.** Not needed for the bundled frontend, which is served from the same origin. A frontend on another origin would need CORS added first.
 - **Malformed or oversized (over 50 KB) JSON bodies return `500`** instead of `400`/`413`.
 - **No automated tests yet.**

@@ -71,6 +71,28 @@ Newest entries go at the bottom, under a dated heading.
 - `docs/DEPLOYMENT.md` rewritten as a first-timer's guide: 10 setup steps, each with what/why/check, then operations (rollback, settings, changing the email domain, secret rotation, migrations, restore, adding sites) and troubleshooting tables.
 - Tested end to end through the real frontend client and the Vite `/api` proxy: 24 checks, including 3 concurrent 401s sharing a single refresh. The runtime migrator built the full schema on an empty database.
 - Local fix: `main`'s dev database had picked up two migrations from the `microservice-architecture` branch (`sessions` table, `refresh_token` dropped). They were rolled back by hand.
+
+## 21 Oct 2026 · Load testing, rate limiting and hashing off the main thread
+- **Load-tested** on 2 pinned cores (KVM 2-like), with a stubbed Resend, using returning-user sessions and real client IPs via `X-Forwarded-For`. Before the fixes:
+  - 500 people online was fine.
+  - **2,000 people online collapsed** (p95 12 s).
+  - **32 password-guessing bots took the app down** for real users (p50 28 s).
+  - The API only ever used one core.
+- **Rate limiting** (ported from the `microservice-architecture` design): `express-rate-limit` with a Redis store.
+  - Per IP, per email (failures only) and per user, on every endpoint that checks a password, sends an email or takes a single-use token.
+  - Identical 429s for known and unknown emails.
+  - Fails open if Redis is down.
+  - Redis added to both compose files, with no persistence and a 48 MB cap.
+- **Native `bcrypt`** in place of `bcryptjs`. Hashing runs on libuv's thread pool, so it uses both cores and stops stalling other requests. The hash format is unchanged.
+- **Keep-alive fix:** Node now keeps idle connections for 125 s (`headersTimeout` 126 s) and Caddy's upstream pool closes them at 60 s, so Caddy never reuses a socket Node has closed. Before, that race would have caused random 502s on POSTs.
+- **CPU and memory caps** on every container. CKAuth is capped at ~1.4 GB RAM, and the API at 1.5 vCPU.
+- **After the fixes:**
+  - 2,000 people online: p95 ~100 ms.
+  - Sign-in ~42/s (was 17), sign-up ~39/s (was 16).
+  - One attacker: blocked, and real users keep p95 46 ms.
+  - Botnet with real emails: real users slow to ~0.8 s (was 28 s).
+  - Memory: the API idles at ~270 MB, ~200 MB of it from importing `drizzle-orm@1.0.0-rc.4`'s node-postgres driver.
+- **Closed a sign-in timing leak** found by the load test. Unknown emails answered in ~16 ms and real accounts in ~60 ms, because bcrypt was skipped, which revealed who's registered. Sign-in now compares against a dummy hash (random, made at startup, at the same cost as real hashes): 54.4 ms vs 54.5 ms, with identical bodies.
 - The API now sets `trust proxy` (so `req.ip` is the real client behind Caddy, ready for rate limiting) and drops `X-Powered-By`.
 
 ---
@@ -82,6 +104,8 @@ Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.m
 - Rate limiting (design ready: Redis store, separate limits per IP and per email).
 - First production deploy to the VPS (follow `docs/DEPLOYMENT.md`).
 - Move the sender to a CKAuth-branded domain (`EMAIL_FROM` only, see "Changing the email domain").
+- Investigate `drizzle-orm` rc's ~200 MB import cost (upgrade when a fixed release ships).
+- Cloudflare (WAF/Turnstile) in front, for botnet-scale credential stuffing.
 - Automated off-server database backups.
 - Return 400, not 500, for malformed JSON bodies.
 - Possibly let a password reset also mark the email as verified.

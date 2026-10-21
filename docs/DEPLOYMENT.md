@@ -21,7 +21,7 @@ This guide takes you from an empty Hostinger VPS to CKAuth running at **`https:/
   8. [First deploy](#step-8-first-deploy)
   9. [Check everything works](#step-9-check-everything-works)
   10. [Turn on backups](#step-10-turn-on-backups)
-- **[Part C: Everyday operations](#part-c-everyday-operations)**: deploying, rolling back, settings, **changing the email domain**, secrets, migrations, logs, restoring, other sites, server updates
+- **[Part C: Everyday operations](#part-c-everyday-operations)**: deploying, rolling back, settings, **changing the email domain**, secrets, migrations, logs, restoring, other sites, **resource budget and capacity**, server updates
 - [Part D: Troubleshooting](#part-d-troubleshooting)
 - [Part E: Reference](#part-e-reference)
 
@@ -73,9 +73,9 @@ You'll understand the steps better if you know what you're building.
 │   └───────────┬──────────┘  │ app's files        │                                        │
 │               │             └────────────────────┘                                        │
 │               │ "internal" network (CKAuth only)                                          │
-│   ┌───────────▼──────────┐                                                                │
-│   │ db (Postgres 17)     │  Not reachable from the internet or from other sites.          │
-│   └──────────────────────┘                                                                │
+│   ┌───────────▼──────────┐  ┌──────────────────────┐                                      │
+│   │ db (Postgres 17)     │  │ redis (rate limits)  │  Not reachable from the internet       │
+│   └──────────────────────┘  └──────────────────────┘  or from other sites.                  │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -83,7 +83,7 @@ You'll understand the steps better if you know what you're building.
 
 1. The browser asks for `https://ckauth.chiragdev.com/sign-in`. The **edge** proxy handles HTTPS and passes the request to **ckauth-web**, which returns the React app.
 2. The app calls `https://ckauth.chiragdev.com/api/auth/sign-in`. The edge strips `/api` and passes `/auth/sign-in` to **ckauth-api**.
-3. The API checks the password in **db** and sets the session cookies.
+3. The API checks the sign-in hasn't hit a rate limit (counts kept in **redis**), checks the password in **db**, and sets the session cookies.
 
 Because the app and the API share **one address**, the session cookies just work: no CORS, no cross-site cookie problems.
 
@@ -606,6 +606,52 @@ For example, a portfolio at `chiragdev.com`:
    docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
    ```
 
+### Resource budget: what's left for other sites
+
+A Hostinger KVM 2 has **2 vCPUs, 8 GB RAM and 100 GB of NVMe disk**. Every CKAuth container has a hard memory cap and a CPU cap (`deploy.resources.limits` in `deploy/compose.yml`), so these numbers are ceilings, not hopes.
+
+**Memory**
+
+| Container | Cap | Typical use | Notes |
+|---|---:|---:|---|
+| `api` | 512 MB | 270–310 MB | Measured, idle to full load. Most of it is `drizzle-orm`'s import cost, not live data |
+| `db` (Postgres) | 768 MB | ~100–200 MB | Grows with its cache as the user table grows |
+| `redis` | 64 MB | < 10 MB | Rate-limit counters only; `maxmemory 48mb` inside |
+| `web` | 64 MB | ~20 MB | Static files |
+| **CKAuth total** | **~1.4 GB** | **~0.4–0.55 GB** | |
+| `edge` (shared by every site) | 256 MB | ~30 MB | Counted once, not per site |
+| Ubuntu + Docker | n/a | ~0.5 GB | |
+| **Left for other sites** | **≥ 5.8 GB guaranteed** | **~7 GB in practice** | |
+
+**CPU**
+
+| Situation | CKAuth uses | Left for other sites |
+|---|---|---|
+| Idle | ~0% | ~2 vCPUs |
+| 500 people online | ~0.4–0.5 vCPU | ~1.5 vCPUs |
+| 2,000 people online | ~1.3 vCPU | ~0.7 vCPU |
+| Password-guessing flood from many IPs | Up to the 1.5 vCPU API cap | ≥ 0.5 vCPU |
+
+CPU caps are ceilings, not reservations: when CKAuth is quiet, other sites can use both vCPUs.
+
+**Disk:** about 1–2 GB in total. That's the images (~0.8 GB), the database (a few MB per thousand users), 14 days of backups, and logs (capped at 30 MB per container). That leaves **~95 GB**.
+
+**In short:** CKAuth needs about **¼ of the machine** in normal use, and at most **¾ of the CPU and under 1.5 GB of RAM** even when it's being hammered. A couple more small to medium sites (a portfolio, a static site, another small API with its own database) fit comfortably.
+
+### Capacity: what CKAuth can handle
+
+Measured on 2 dedicated cores, with the API capped like production. **Expect about 20–30% less on the real VPS**, because there Postgres shares the same cores, every connection goes through HTTPS, and vCPUs are shared with other customers.
+
+| Load | Result |
+|---|---|
+| People online at once (each doing something every 2–6 s) | **2,000: p95 ~100 ms**. 1,000: p95 5 ms |
+| Sign-ins per second (bcrypt bound) | ~40 (~30 with the 1.5 vCPU cap) |
+| Profile loads (`/me`) per second | ~2,100 |
+| One attacker guessing passwords | Blocked after 100 attempts in 15 min; real users unaffected (p95 46 ms) |
+| A botnet using real account emails (rate limits can't stop it) | Real users slow to ~0.8 s until every targeted email has failed 5 times |
+
+**If you outgrow this:** a botnet is the one case the app can't absorb on its own. Put Cloudflare in front, either as a proxy with a WAF or with Turnstile on the sign-in form. Beyond ~2,000 people online at once, move to a KVM 4 (4 vCPUs) and raise the API's CPU cap.
+
 ### Keeping the server up to date
 
 - **Security updates** install automatically every day (`unattended-upgrades`).
@@ -642,6 +688,15 @@ For example, a portfolio at `chiragdev.com`:
 | Email lands in spam | The domain is new, or DMARC is missing | Add Resend's DMARC record; the reputation improves over days |
 | Email links open the wrong site | `DOMAIN` in `/opt/ckauth/.env` is wrong | Fix it → `docker compose up -d api` |
 
+### Rate limits
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A real user gets "Too many requests" | They (or someone guessing their password) hit a limit; see the table in [API.md](API.md#rate-limits) | Wait out the window (15 min for sign-in), or clear it now: `docker compose exec redis redis-cli --scan --pattern 'rl:signin-email:*'` lists the keys, then `redis-cli del <key>` |
+| Everyone at one office/school gets 429 on sign-in | They share one public IP, and 100 sign-ins per 15 min is the per-IP limit | Raise `signinPerIp` in `src/app/middlewares/rate-limit.ts` |
+| Limits seem to do nothing; API logs show `Redis error` | Redis is down, and limits fail open on purpose so sign-in keeps working | `docker compose ps redis`; `docker compose up -d redis` |
+| Every request appears to come from one IP | The API isn't seeing the real client address | It must be reached only through the edge proxy (it trusts exactly one proxy hop) |
+
 ### Deploys (GitHub Actions)
 
 | Failing step / message | Cause | Fix |
@@ -674,7 +729,7 @@ For example, a portfolio at `chiragdev.com`:
 |---|---|
 | `Dockerfile` | Builds the API image (non-root, production dependencies only) |
 | `frontend/Dockerfile`, `frontend/Caddyfile` | Builds the web image: the React build served by Caddy on :8080 |
-| `deploy/compose.yml` | The CKAuth stack: `db`, `migrate`, `api`, `web` |
+| `deploy/compose.yml` | The CKAuth stack: `db`, `redis`, `migrate`, `api`, `web`, each with CPU/memory caps |
 | `deploy/ckauth.caddy` | Public routing and security headers for `ckauth.chiragdev.com` |
 | `deploy/deploy.sh` | Runs on the VPS during a deploy: `deploy.sh <api\|web> <sha>` |
 | `deploy/backup.sh` | Nightly database dump with 14-day retention |
@@ -702,6 +757,7 @@ For example, a portfolio at `chiragdev.com`:
 | 80, 443 (TCP), 443 (UDP) | Internet | The edge proxy (HTTP → HTTPS redirect, HTTPS, HTTP/3) |
 | 8080 | The `edge` Docker network only | `ckauth-api`, `ckauth-web` |
 | 5432 | The `internal` Docker network only | Postgres |
+| 6379 | The `internal` Docker network only | Redis (rate-limit counts; nothing stored on disk) |
 
 ### GitHub `production` environment
 

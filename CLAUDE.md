@@ -19,7 +19,7 @@ The product is **CKAuth**, at `https://ckauth.chiragdev.com`. `frontend/` holds 
 ```bash
 pnpm build          # type check + compile; run before every commit
 pnpm dev            # watch mode on PORT (default 8080)
-pnpm db:up          # start Postgres in Docker
+pnpm db:up          # start Postgres and Redis in Docker
 pnpm db:generate    # create a migration after editing src/db/schema.ts
 pnpm db:migrate     # apply migrations
 cd frontend && pnpm build   # frontend type check + build (also run before every commit if frontend/ changed)
@@ -35,7 +35,7 @@ There is no test suite. Verify changes by building, then running the real flow a
 - `src/app/auth/controller.ts`: `AuthController` class, one `handleX` method per endpoint
 - `src/app/auth/models.ts`: Zod schemas named `<thing>PayloadModel`
 - `src/app/auth/middleware.ts`: `authenticateToken` (sets `req.user`; rejects unverified users)
-- `src/app/middlewares/`: cross-cutting Express middleware (error handler, uploads)
+- `src/app/middlewares/`: cross-cutting Express middleware (error handler, uploads, `rate-limit.ts`). Every endpoint that checks a password, sends an email or takes a single-use token gets a limiter in `routes.ts`, keyed per IP, email or user; keep `docs/API.md`'s rate-limit table in sync
 - `src/utils/`: `ApiError`, `ApiResponse`, `mail.ts`, `imagekit.ts` (third-party clients live here)
 - `src/db/schema.ts` → migrations in `drizzle/`; `src/db/migrate.ts` applies them in production
 - `frontend/src/lib/api.ts`: the only place that calls `fetch`; `/api` prefix, `credentials: 'include'`, single-flight refresh on 401 for `authed` requests
@@ -64,7 +64,7 @@ if(!validationResult.success) {
 
 ## Security rules (do not regress)
 
-- **Hash every token before storing it:** `crypto.createHash('sha256')` for random tokens (refresh, verification, reset), and bcrypt for passwords. Use `createTempToken()` (bottom of `controller.ts`) for new tokens.
+- **Hash every token before storing it:** `crypto.createHash('sha256')` for random tokens (refresh, verification, reset), and bcrypt for passwords. Use native `bcrypt` (thread pool), never `bcryptjs`: on the main thread, each hash stalls every other request. Use `createTempToken()` (bottom of `controller.ts`) for new tokens.
 - **No account enumeration.** Sign-up, sign-in and forgot-password return the same response whether or not the account exists. Explain differences by email, never in the response.
 - **Unverified users get no session:** sign-in, `/refresh` and `authenticateToken` return 403. Verifying requires the signup password.
 - **Let the database decide races.** Use unique constraints with `onConflictDoNothing`, conditional `UPDATE … WHERE … RETURNING` for check-then-act (e.g. email cooldowns), and `SELECT … FOR UPDATE` in a transaction when replacing a stored value. Never make a network call (email, ImageKit) inside a transaction.
@@ -82,7 +82,7 @@ if(!validationResult.success) {
 
 ## Known gaps
 
-- No rate limiting. A design is agreed (express-rate-limit + Redis, separate limits per IP and per email) but it's on hold until the user asks.
+- Rate limits fail open: if Redis is unreachable, requests pass (`passOnStoreError`) and the error is logged.
 - No CORS middleware (not needed while the frontend is same-origin).
 - Malformed or oversized JSON bodies return 500, because `errorHandler` only recognises `ApiError` (body-parser errors carry `status` 400/413).
 - Ending a session revokes the refresh token, but access tokens stay valid until they expire (there is no access-token denylist).
