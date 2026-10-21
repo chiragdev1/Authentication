@@ -1,56 +1,16 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createRoot, hydrateRoot } from 'react-dom/client'
 import { createBrowserRouter } from 'react-router'
-import { RouterProvider } from 'react-router/dom'
 import './index.css'
-import { AuthProvider } from './lib/auth.tsx'
-import { ThemeProvider } from './lib/theme.tsx'
-import { LookProvider } from './lib/design-lab.tsx'
-import { GuestOnly, Layout, RequireAuth } from './components/layout.tsx'
-import { Home } from './pages/home.tsx'
-import { SignUp } from './pages/sign-up.tsx'
-import { SignIn } from './pages/sign-in.tsx'
-import { VerifyEmail } from './pages/verify-email.tsx'
-import { ForgotPassword } from './pages/forgot-password.tsx'
-import { ResetPassword } from './pages/reset-password.tsx'
-import { Dashboard } from './pages/dashboard.tsx'
-import { NotFound } from './pages/not-found.tsx'
-import { DesignLabPanel } from './components/design-lab-panel.tsx'
+import { App, routes } from './app.tsx'
 
-// these paths are fixed by the links the api puts in emails (docs/API.md, "Frontend pages the emails link to")
-const router = createBrowserRouter([
-  {
-    element: <Layout />,
-    children: [
-      { path: '/', element: <Home /> },
-      {
-        element: <GuestOnly />,
-        children: [
-          { path: '/sign-up', element: <SignUp /> },
-          { path: '/sign-in', element: <SignIn /> },
-        ],
-      },
-      { path: '/verify-email', element: <VerifyEmail /> },
-      { path: '/forgot-password', element: <ForgotPassword /> },
-      { path: '/reset-password', element: <ResetPassword /> },
-      {
-        element: <RequireAuth />,
-        children: [{ path: '/dashboard', element: <Dashboard /> }],
-      },
-      { path: '*', element: <NotFound /> },
-    ],
-  },
-])
+const container = document.getElementById('root')!
+const app = <App router={createBrowserRouter(routes)} />
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ThemeProvider>
-      <LookProvider>
-        <AuthProvider>
-          <RouterProvider router={router} />
-          <DesignLabPanel />
-        </AuthProvider>
-      </LookProvider>
-    </ThemeProvider>
-  </StrictMode>,
-)
+// scripts/prerender.js marks the html it rendered at build time; only hydrate when that html is for this url,
+// so a page served the empty shell (or `vite preview`'s fallback) renders from scratch instead
+if(container.dataset.prerendered === window.location.pathname) {
+  hydrateRoot(container, app)
+} else {
+  container.replaceChildren()
+  createRoot(container).render(app)
+}

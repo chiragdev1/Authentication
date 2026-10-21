@@ -1,0 +1,6 @@
+# the app pages aren't blocked here on purpose: crawlers must fetch them to see their X-Robots-Tag: noindex
+# (frontend/Caddyfile). a disallowed url can still be indexed from links, just without its content
+User-agent: *
+Disallow: /api/
+
+Sitemap: https://ckauth.chiragdev.com/sitemap.xml

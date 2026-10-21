@@ -7,6 +7,7 @@ import { validateEmail } from '@/lib/validation.ts'
 import { AuthShell } from '@/components/auth-shell.tsx'
 import { FormAlert, TextField } from '@/components/form.tsx'
 import { Button } from '@/components/ui/button.tsx'
+import { useDocumentTitle } from '@/lib/use-document-title.ts'
 
 const backToSignIn = (
   <Link to="/sign-in" className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline">
@@ -15,6 +16,8 @@ const backToSignIn = (
 )
 
 export function ForgotPassword() {
+  useDocumentTitle('Recover access')
+
   const [sent, setSent] = useState(false)
 
   const form = useForm({

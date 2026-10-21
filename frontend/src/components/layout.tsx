@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import { LayoutDashboard, LogOut } from 'lucide-react'
 import { useAuth } from '@/lib/auth.tsx'
@@ -12,7 +13,10 @@ export function Layout() {
     <div className="flex min-h-dvh flex-col">
       <SiteHeader />
       <main className="flex flex-1 flex-col">
-        <Outlet />
+        {/* the app pages are lazy-loaded (app.tsx); header and footer stay put while one arrives */}
+        <Suspense fallback={<Spinner />}>
+          <Outlet />
+        </Suspense>
       </main>
       <SiteFooter />
     </div>

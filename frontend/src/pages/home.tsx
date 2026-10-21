@@ -4,8 +4,10 @@ import { useAuth } from '@/lib/auth.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card.tsx'
+import { useDocumentTitle } from '@/lib/use-document-title.ts'
 
 export function Home() {
+  useDocumentTitle()
   return (
     <>
       <Hero />

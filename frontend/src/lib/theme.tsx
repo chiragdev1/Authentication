@@ -27,7 +27,8 @@ const darkQuery = () => window.matchMedia('(prefers-color-scheme: dark)')
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(readStoredTheme)
-  const [systemDark, setSystemDark] = useState(() => darkQuery().matches)
+  // no window while the home page is prerendered at build time; nothing rendered depends on this, so hydration still matches
+  const [systemDark, setSystemDark] = useState(() => typeof window !== 'undefined' && darkQuery().matches)
 
   // follow the os live while the user hasn't picked a theme
   useEffect(() => {

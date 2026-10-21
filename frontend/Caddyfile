@@ -12,7 +12,21 @@
 	# index.html must always be revalidated, or users keep loading an old deploy
 	header ?Cache-Control "no-cache"
 
-	# client-side routes like /verify-email fall back to the SPA
-	try_files {path} /index.html
+	# the client-side routes (src/app.tsx; keep the two lists in sync) get app.html, the empty shell,
+	# because index.html holds the prerendered home page. they're app screens, not content, so keep them out of search
+	@app path /sign-up /sign-in /verify-email /forgot-password /reset-password /dashboard /app.html
+	header @app X-Robots-Tag "noindex"
+	rewrite @app /app.html
+
 	file_server
+
+	# anything else is a real 404 (not a 200 "soft 404" that search engines index); the shell still renders the 404 page
+	handle_errors 404 {
+		header Cache-Control "no-cache"
+		header X-Robots-Tag "noindex"
+		rewrite * /app.html
+		file_server {
+			status 404
+		}
+	}
 }

@@ -1,6 +1,6 @@
 # API Reference
 
-Everything a client needs in order to use the Authentication API.
+Everything a client needs in order to use the Authentication API. New to some of the terms (endpoint, status code, `httpOnly` cookie, refresh token)? They're defined in the [glossary](GLOSSARY.md).
 
 - **Base URL (production):** `https://ckauth.chiragdev.com/api`. The proxy strips `/api`, so `POST https://ckauth.chiragdev.com/api/auth/sign-in` reaches `POST /auth/sign-in`.
 - **Base URL (local):** `http://localhost:8080`, or `http://localhost:3000/api` through the frontend's dev proxy.

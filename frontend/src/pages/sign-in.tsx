@@ -6,8 +6,11 @@ import { validateEmail, validateExistingPassword } from '@/lib/validation.ts'
 import { AuthShell } from '@/components/auth-shell.tsx'
 import { FormAlert, PasswordField, TextField } from '@/components/form.tsx'
 import { Button } from '@/components/ui/button.tsx'
+import { useDocumentTitle } from '@/lib/use-document-title.ts'
 
 export function SignIn() {
+  useDocumentTitle('Sign in')
+
   const navigate = useNavigate()
   const location = useLocation()
   const { reloadUser } = useAuth()

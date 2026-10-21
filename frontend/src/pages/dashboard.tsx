@@ -11,12 +11,15 @@ import { Badge } from '@/components/ui/badge.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.tsx'
 import { Separator } from '@/components/ui/separator.tsx'
+import { useDocumentTitle } from '@/lib/use-document-title.ts'
 
 // mirrors the api's limits so obvious mistakes fail instantly; the api still checks the real bytes
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024
 const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 export function Dashboard() {
+  useDocumentTitle('Dashboard')
+
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()

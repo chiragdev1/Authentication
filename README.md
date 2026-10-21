@@ -5,6 +5,7 @@ It handles the full account lifecycle: sign-up with email verification, cookie-b
 
 > **Building a frontend against this API?** Go straight to the **[API reference](docs/API.md)**.
 > **Deploying?** See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (Hostinger VPS, Docker Compose, GitHub Actions).
+> **New to auth or web hosting?** The **[glossary](docs/GLOSSARY.md)** explains every term the docs use, and **[DEVLOG](DEVLOG.md)** / **[LEARNINGS](LEARNINGS.md)** tell the story of how this was built and what went wrong.
 
 The repo also contains the **CKAuth web app** in [`frontend/`](frontend/) (React + Vite + Tailwind), which implements every flow in the API.
 
