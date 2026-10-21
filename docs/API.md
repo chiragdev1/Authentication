@@ -50,7 +50,7 @@ Every response has the same shape.
 
 ### Authentication
 
-Sessions use two **`httpOnly` cookies** that the API sets on sign-in. Your code never reads, stores or sends tokens by hand.
+Sessions use two **`httpOnly` cookies** that the API sets on sign-in and on email verification. Your code never reads, stores or sends tokens by hand.
 
 | Cookie | Purpose | Lifetime |
 |---|---|---|
@@ -182,10 +182,10 @@ Verifies the user's email. `:token` comes from the `?token=` in the verification
 **Response: `200`**
 
 ```json
-{ "success": true, "message": "Email verified successfully", "data": null }
+{ "success": true, "message": "Email verified successfully", "data": { "id": "7a95b874-5c81-4cf8-8c88-33f6015c7aa5" } }
 ```
 
-The user can now sign in. A welcome email is sent.
+**The user is now signed in:** the response sets the `access_token` and `refresh_token` cookies, exactly like [Sign in](#post-authsign-in), so send them straight to the app. Any session started before verifying is ended. A welcome email is sent.
 
 **Errors**
 
@@ -421,8 +421,7 @@ Sets a new password. `:token` comes from the `?token=` in the reset link.
 ```
 POST /auth/sign-up                 → 201, show "check your inbox"
    (user clicks the email link → your /verify-email?token=… page)
-POST /auth/verify-email/:token     → 200, with { password }
-POST /auth/sign-in                 → 200, cookies set
+POST /auth/verify-email/:token     → 200, with { password }, cookies set (signed in)
 GET  /auth/me                      → 200
 ```
 

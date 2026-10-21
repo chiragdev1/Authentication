@@ -223,12 +223,17 @@ export class AuthController {
       throw ApiError.unauthorized('Incorrect password, this verification link has been cancelled. Sign up again or sign in to get a new link')
     }
 
+    // the link and the password together prove both inbox and account, the same proof sign-in asks for, so verifying also starts a session
+    const accessToken = generateAccessToken({userId: userInDb.id})
+    const refreshToken = generateRefreshToken({userId: userInDb.id})
+    const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex')
+
     // mark the email verified and remove the token; matching on the token means a signup that replaced the details in the meantime
     // (and so the password just checked) makes this update do nothing.
-    // clearing the refreshToken signs out any session started before the email was verified
+    // replacing the refreshToken signs out any session started before the email was verified, and saves the new one in the same write
     const [updateRes] = await db
       .update(usersTable)
-      .set({emailVerified: true, emailVerificationToken: null, emailVerificationTokenExpiry: null, refreshToken: null})
+      .set({emailVerified: true, emailVerificationToken: null, emailVerificationTokenExpiry: null, refreshToken: hashedRefreshToken})
       .where(and(eq(usersTable.id, userInDb.id), eq(usersTable.emailVerificationToken, hashedToken)))
       .returning({id: usersTable.id})
 
@@ -237,12 +242,16 @@ export class AuthController {
       throw ApiError.notFound('Invalid or expired email token')
     }
 
+    // cookies only once the update succeeded, so a lost race never hands out a session
+    res.cookie('access_token', accessToken, {...cookieOptions, expires: getTokenExpiry(accessToken)})
+    res.cookie('refresh_token', refreshToken, {...cookieOptions, expires: getTokenExpiry(refreshToken)})
+
     // send welcome mail now that signup is complete; a mail failure shouldn't fail verification
     sendWelcomeMail(userInDb.email, userInDb.firstName).catch((error) => {
       console.error(`Failed to send welcome mail to ${userInDb.email}:`, error)
     })
 
-    return ApiResponse.ok(res, 'Email verified successfully')
+    return ApiResponse.ok(res, 'Email verified successfully', {id: updateRes.id})
   }
 
   public async handleLogout(req: Request, res: Response) {
