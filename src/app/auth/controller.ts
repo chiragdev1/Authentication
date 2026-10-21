@@ -1,5 +1,6 @@
 import type {Request, Response} from 'express'
-import bcrypt from 'bcryptjs'
+// native bcrypt hashes on libuv's thread pool, so password checks don't block other requests
+import bcrypt from 'bcrypt'
 import crypto from 'crypto'
 
 import { changePasswordPayloadModel, forgotPasswordPayloadModel, resetPasswordPayloadModel, signinPayloadModel, signupPayloadModel, verifyEmailPayloadModel } from './models.js';
