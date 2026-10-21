@@ -1,13 +1,164 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/cinzel";
 
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+/* theme.tsx puts .dark on <html>, so dark: follows the toggle instead of the os setting */
+@custom-variant dark (&:is(.dark *));
+
+/* design lab (lib/design-lab.tsx): a candidate look overrides the tokens under :root[data-look="<id>"] and
+   :root[data-look="<id>"].dark, placed after the defaults below. for markup tweaks, add a variant like
+   @custom-variant <id> (&:is([data-look="<id>"] *)); and use <id>:… classes. delete a candidate once it's decided */
+
+/* day: morning over the walls. warm parchment, ember for anything that acts, steel for quiet accents */
+:root {
+  --radius: 0.75rem;
+  --background: #f5efe8;
+  --foreground: #1b1520;
+  --card: #fffaf4;
+  --card-foreground: #1b1520;
+  --popover: #fffaf4;
+  --popover-foreground: #1b1520;
+  --primary: #c2410c;
+  --primary-foreground: #fff7ed;
+  --secondary: #2d3a4a;
+  --secondary-foreground: #f5efe8;
+  --muted: #ece3d9;
+  --muted-foreground: #6b5f66;
+  --accent: #efe5da;
+  --accent-foreground: #1b1520;
+  --destructive: #b91c1c;
+  --success: #3f7d4e;
+  --brass: #a16207;
+  --border: #e0d4c6;
+  --input: #d6c8b8;
+  --ring: #c2410c;
+  --wall: rgb(194 65 12 / 0.08);
 }
 
-html {
-  color-scheme: light dark;
+/* night: dusk over the walls. indigo sky, ember light, charcoal stone */
+.dark {
+  --background: #0e0d14;
+  --foreground: #f1e8dc;
+  --card: #16141e;
+  --card-foreground: #f1e8dc;
+  --popover: #1a1824;
+  --popover-foreground: #f1e8dc;
+  --primary: #f0642a;
+  --primary-foreground: #1b0d05;
+  --secondary: #3b4a5e;
+  --secondary-foreground: #f1e8dc;
+  --muted: #1f1c29;
+  --muted-foreground: #a79bab;
+  --accent: #241f2f;
+  --accent-foreground: #f1e8dc;
+  --destructive: #f87171;
+  --success: #6fcf8f;
+  --brass: #e0a84f;
+  --border: #2a2533;
+  --input: #363042;
+  --ring: #f0642a;
+  --wall: rgb(240 100 42 / 0.07);
 }
 
-body {
-  @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Cinzel Variable", "Trajan Pro", Georgia, serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-brass: var(--brass);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+  /* edge draws its own reveal button inside password inputs, on top of ours */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }
+  ::selection {
+    @apply bg-primary text-primary-foreground;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: 0.01em;
+  }
+  .eyebrow {
+    @apply font-display text-xs font-semibold tracking-[0.3em] text-primary uppercase;
+  }
+
+  /* a soft ember glow from the top of a section */
+  .bg-wall {
+    background-image: radial-gradient(ellipse 80% 60% at 50% 0%, var(--wall), transparent 70%);
+  }
+
+  /* a faint blueprint grid in the border colour, fading out from the top; the only backdrop the hero and panels need */
+  .bg-grid {
+    background-image: linear-gradient(to right, var(--border) 1px, transparent 1px), linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 30%, transparent 75%);
+  }
+
+  /* a card lifted on ember light */
+  .dossier {
+    position: relative;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 18%, transparent), 0 30px 60px -30px color-mix(in oklab, var(--primary) 45%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* the landing page's ticker: two copies of the strip side by side, shifted by one copy's width */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@utility animate-marquee {
+  animation: marquee 40s linear infinite;
 }

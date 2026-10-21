@@ -4,6 +4,8 @@ import { createBrowserRouter } from 'react-router'
 import { RouterProvider } from 'react-router/dom'
 import './index.css'
 import { AuthProvider } from './lib/auth.tsx'
+import { ThemeProvider } from './lib/theme.tsx'
+import { LookProvider } from './lib/design-lab.tsx'
 import { GuestOnly, Layout, RequireAuth } from './components/layout.tsx'
 import { Home } from './pages/home.tsx'
 import { SignUp } from './pages/sign-up.tsx'
@@ -13,6 +15,7 @@ import { ForgotPassword } from './pages/forgot-password.tsx'
 import { ResetPassword } from './pages/reset-password.tsx'
 import { Dashboard } from './pages/dashboard.tsx'
 import { NotFound } from './pages/not-found.tsx'
+import { DesignLabPanel } from './components/design-lab-panel.tsx'
 
 // these paths are fixed by the links the api puts in emails (docs/API.md, "Frontend pages the emails link to")
 const router = createBrowserRouter([
@@ -41,8 +44,13 @@ const router = createBrowserRouter([
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AuthProvider>
-      <RouterProvider router={router} />
-    </AuthProvider>
+    <ThemeProvider>
+      <LookProvider>
+        <AuthProvider>
+          <RouterProvider router={router} />
+          <DesignLabPanel />
+        </AuthProvider>
+      </LookProvider>
+    </ThemeProvider>
   </StrictMode>,
 )

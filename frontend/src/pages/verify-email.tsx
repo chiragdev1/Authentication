@@ -1,51 +1,71 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
-import { api, ApiRequestError } from '../lib/api.ts'
-import { useAction } from '../lib/use-action.ts'
-import { useUrlToken } from '../lib/use-url-token.ts'
-import { Alert, AuthPage, Button, Field, TextLink } from '../components/ui.tsx'
+import { Link, useNavigate } from 'react-router'
+import { LinkIcon } from 'lucide-react'
+import { api, ApiRequestError } from '@/lib/api.ts'
+import { useAuth } from '@/lib/auth.tsx'
+import { useForm } from '@/lib/use-form.ts'
+import { useUrlToken } from '@/lib/use-url-token.ts'
+import { validateExistingPassword } from '@/lib/validation.ts'
+import { AuthShell } from '@/components/auth-shell.tsx'
+import { FormAlert, PasswordField } from '@/components/form.tsx'
+import { Button } from '@/components/ui/button.tsx'
 
 export function VerifyEmail() {
   const token = useUrlToken()
   const navigate = useNavigate()
+  const { reloadUser } = useAuth()
   // once the api rejects the link it can never work again, so hide the form
   const [deadLink, setDeadLink] = useState<string | null>(null)
 
-  const { pending, error, onSubmit } = useAction(async form => {
-    try {
-      await api(`/auth/verify-email/${encodeURIComponent(token!)}`, {
-        method: 'POST',
-        body: { password: String(form.get('password')) },
-      })
-    } catch (caught) {
-      if(caught instanceof ApiRequestError && caught.status === 401) {
-        setDeadLink('That password didn\'t match, so this link has been cancelled to protect the account. Sign up again or sign in to get a new link.')
-        return
+  const form = useForm({
+    initial: { password: '' },
+    validate: { password: validateExistingPassword },
+    submit: async values => {
+      try {
+        await api(`/auth/verify-email/${encodeURIComponent(token!)}`, { method: 'POST', body: { password: values.password } })
+      } catch (caught) {
+        if(caught instanceof ApiRequestError && caught.status === 401) {
+          setDeadLink('That password didn\'t match, so this link has been cancelled to protect the account. Sign up again or sign in to get a new link.')
+          return
+        }
+        if(caught instanceof ApiRequestError && caught.status === 404) {
+          setDeadLink('This link has expired or was already used. Sign in and we\'ll email you a new one.')
+          return
+        }
+        throw caught
       }
-      if(caught instanceof ApiRequestError && caught.status === 404) {
-        setDeadLink('This link has expired or was already used. Sign in and we\'ll email you a new one.')
-        return
-      }
-      throw caught
-    }
-    navigate('/sign-in', { replace: true, state: { notice: 'Email verified. You can sign in now.' } })
+      // verifying sets the session cookies, so load the user and go straight in
+      await reloadUser()
+      navigate('/dashboard', { replace: true, state: { welcome: true } })
+    },
   })
 
   if(!token || deadLink) {
     return (
-      <AuthPage title="This link doesn't work" footer={<><TextLink to="/sign-in">Sign in</TextLink> · <TextLink to="/sign-up">Sign up</TextLink></>}>
-        <Alert kind="error">{deadLink ?? 'The verification link is missing its token. Open the link from your email again.'}</Alert>
-      </AuthPage>
+      <AuthShell
+        eyebrow="Gate sealed"
+        title="This link doesn't work"
+        footer={<><Link to="/sign-in" className="font-medium text-primary hover:underline">Sign in</Link><span className="mx-2">·</span><Link to="/sign-up" className="font-medium text-primary hover:underline">Sign up</Link></>}
+      >
+        <div className="flex flex-col items-center gap-5 text-center">
+          <span className="flex size-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+            <LinkIcon className="size-6" />
+          </span>
+          <FormAlert kind="error">{deadLink ?? 'The verification link is missing its token. Open the link from your email again.'}</FormAlert>
+        </div>
+      </AuthShell>
     )
   }
 
   return (
-    <AuthPage title="Verify your email" subtitle="Enter the password you chose when you signed up. This proves the account is yours.">
-      <form onSubmit={onSubmit} className="space-y-4">
-        {error && <Alert kind="error">{error}</Alert>}
-        <Field label="Password" name="password" type="password" autoComplete="current-password" required />
-        <Button type="submit" loading={pending} className="w-full">Verify email</Button>
+    <AuthShell eyebrow="The oath" title="Verify your email" subtitle="Enter the password you chose when you signed up. It proves the account is yours, and signs you straight in.">
+      <form ref={form.formRef} onSubmit={form.onSubmit} noValidate className="space-y-5">
+        {form.formError && <FormAlert kind="error">{form.formError}</FormAlert>}
+        <PasswordField label="Password" autoComplete="current-password" autoFocus error={form.errors.password} {...form.register('password')} />
+        <Button type="submit" size="lg" disabled={form.pending} className="font-display w-full tracking-[0.2em] uppercase">
+          {form.pending ? 'Taking the oath…' : 'Verify and enter'}
+        </Button>
       </form>
-    </AuthPage>
+    </AuthShell>
   )
 }

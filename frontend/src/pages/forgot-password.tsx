@@ -1,27 +1,45 @@
 import { useState } from 'react'
-import { api } from '../lib/api.ts'
-import { useAction } from '../lib/use-action.ts'
-import { Alert, AuthPage, Button, Field, TextLink } from '../components/ui.tsx'
+import { Link } from 'react-router'
+import { ArrowLeft } from 'lucide-react'
+import { api } from '@/lib/api.ts'
+import { useForm } from '@/lib/use-form.ts'
+import { validateEmail } from '@/lib/validation.ts'
+import { AuthShell } from '@/components/auth-shell.tsx'
+import { FormAlert, TextField } from '@/components/form.tsx'
+import { Button } from '@/components/ui/button.tsx'
+
+const backToSignIn = (
+  <Link to="/sign-in" className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline">
+    <ArrowLeft className="size-4" />Back to sign in
+  </Link>
+)
 
 export function ForgotPassword() {
   const [sent, setSent] = useState(false)
 
-  const { pending, error, onSubmit } = useAction(async form => {
-    await api('/auth/forgot-password', { method: 'POST', body: { email: String(form.get('email')) } })
-    setSent(true)
+  const form = useForm({
+    initial: { email: '' },
+    validate: { email: validateEmail },
+    submit: async values => {
+      await api('/auth/forgot-password', { method: 'POST', body: { email: values.email.trim() } })
+      setSent(true)
+    },
   })
 
   return (
-    <AuthPage title="Reset your password" subtitle="Enter your email and we'll send you a link to choose a new password." footer={<TextLink to="/sign-in">Back to sign in</TextLink>}>
+    <AuthShell eyebrow="Search party" title="Reset your password" subtitle="Enter your email and we'll send a link to choose a new password." footer={backToSignIn}>
       {sent ? (
-        <Alert kind="success">If an account exists for that email, a reset link is on its way. It expires in 15 minutes.</Alert>
+        // same message whether or not the account exists, like the api
+        <FormAlert kind="success">If an account exists for that email, a reset link is on its way. It expires in 15 minutes.</FormAlert>
       ) : (
-        <form onSubmit={onSubmit} className="space-y-4">
-          {error && <Alert kind="error">{error}</Alert>}
-          <Field label="Email" name="email" type="email" autoComplete="email" required />
-          <Button type="submit" loading={pending} className="w-full">Send reset link</Button>
+        <form ref={form.formRef} onSubmit={form.onSubmit} noValidate className="space-y-5">
+          {form.formError && <FormAlert kind="error">{form.formError}</FormAlert>}
+          <TextField label="Email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" error={form.errors.email} {...form.register('email')} />
+          <Button type="submit" size="lg" disabled={form.pending} className="font-display w-full tracking-[0.2em] uppercase">
+            {form.pending ? 'Sending…' : 'Send reset link'}
+          </Button>
         </form>
       )}
-    </AuthPage>
+    </AuthShell>
   )
 }
