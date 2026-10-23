@@ -186,7 +186,7 @@ Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.m
 Short-term work, roughly in order. Bracketed IDs such as [B01] point to tests in [docs/SEO-AUDIT.md](docs/SEO-AUDIT.md).
 
 - **SEO phase 1:**
-  - Finish the search title and description (the `TODO(human)` in `frontend/index.html`) and put "authentication" in the hero [O01–O03], then commit and deploy the SEO build.
+  - Deploy the new search title and description (written 23 Oct) [O01, O02]; consider "authentication" in the h1 itself, not only the badge above it [O03].
   - Verify `chiragdev.com` in Google Search Console and Bing Webmaster Tools (DNS TXT records cover every subdomain), submit `sitemap.xml`, request indexing, and check with Google's Rich Results Test [C10, C11]. Add an IndexNow ping to `deploy.sh` [C12].
   - Replace the Hostinger parked page on `chiragdev.com` with a portfolio that links to CKAuth [D02].
   - Show the hero text without the opacity-0 fade-in, which delays the main content appearing [P02, A06]; fix the contrast failures [A02]; add a skip link [A03].

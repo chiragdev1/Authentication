@@ -84,6 +84,7 @@ if(!validationResult.success) {
 - **API changes:** update `docs/API.md` and the frontend in the same change.
 - **Deploys:** migrations run automatically before the new API starts, and rollbacks don't undo them, so keep migrations backwards-compatible. New env vars go in `deploy/api.env.sample` and `docs/DEPLOYMENT.md`, and must be added to `/opt/ckauth/api.env` on the VPS before the deploy that needs them. VPS users: `chirag` (admin, sudo) and `deploy` (CI only, no sudo); root SSH is off. `/opt/ckauth` and `/opt/edge` are setgid folders owned by the `deploy` group, which `chirag` belongs to, so scripts must work whichever of the two owns a file (rename into place, don't `chmod` or `chown`). Settings changes need `docker compose up -d api`, not `restart`. `deploy/backup.sh` is the nightly dump. Containers run as non-root with `cap_drop: [ALL]`, `no-new-privileges` and read-only filesystems where possible, so keep it that way when adding services. The production database has no public port and isn't on the `edge` network. Security headers belong in `deploy/ckauth.caddy`, not in the web container. Breaking changes need a `BREAKING CHANGE:` footer in the commit.
 - **Commits:** Conventional Commits (`feat(auth): …`, `fix(auth): …`), with a body explaining *why* for any behaviour or security change. Only commit when the user asks.
+- **Search copy:** when a user-visible feature ships (or one is removed), update the search title and description in `frontend/index.html` (and `og:title`/`og:description`; the JSON-LD description is copied from the meta description at build time). Keep the title 50–60 characters with the topic words first, the description 140–160 with a call to action, and both true to what the live site does today. If the headline changes, update `og-image.svg` and re-render `public/og.png` too.
 - **After notable changes:** add a dated entry to `DEVLOG.md` (above the `---` before "Lessons") and update its "Next up" (short-term to-dos) and "Future scope" (larger product directions). Add any mistake or lesson to `LEARNINGS.md` under its topic, in the format *what went wrong → fix → **Rule:***.
 
 ## Known gaps
@@ -94,7 +95,6 @@ if(!validationResult.success) {
 - Ending a session revokes the refresh token, but access tokens stay valid until they expire (there is no access-token denylist).
 - **SEO and traffic** (full list with test IDs in `docs/SEO-AUDIT.md`; this build scores 33/100 on its strict tests):
   - The domain is new (registered 21 Oct 2026), `chiragdev.com` itself is a Hostinger parked page, no sites link in yet, and `/` is the only indexable page.
-  - The search title and description lack topic words (`TODO(human)` in `frontend/index.html`).
   - The hero's `animate-in fade-in` starts at opacity 0, which delays LCP (2.4 s mobile lab).
   - Every anonymous visit logs two 401s (`/auth/me`, then `/auth/refresh`).
   - Ten text elements fail WCAG AA contrast (muted `/70`, `opacity-40`, the wall labels); there's no skip link.

@@ -75,8 +75,8 @@ Once a page is fetched, does it clearly say what it's about, in the title, headi
 
 | ID | Test | Must reach | Live | Build | Measured | Fix | Quick |
 |---|---|---|---|---|---|---|---|
-| O01 | Search title | 50–60 characters, topic words first | ❌ | ❌ | 30 characters, no topic word (your TODO is open) | e.g. "Secure Email & Password Authentication Demo · CKAuth" (52) | yes |
-| O02 | Meta description | 140–160 characters, topic word and a call to action | ❌ | ❌ | 101 characters, no "authentication" | Rewrite with the title (151-character draft in the summary) | yes |
+| O01 | Search title | 50–60 characters, topic words first | ❌ | ✅ | Live: 30 characters, no topic word. Fixed 23 Oct: "Secure Email & Password Authentication Demo · CKAuth" (52) | Deploy; not yet counted in the scores above | yes |
+| O02 | Meta description | 140–160 characters, topic word and a call to action | ❌ | ✅ | Live: 101 characters, no topic word. Fixed 23 Oct: 151 characters, topic first, ends "Try it live." | Deploy; not yet counted in the scores above | yes |
 | O03 | One h1 that names the topic | Exactly one h1 that says what the page is | ❌ | ❌ | Live: no h1 without JS. Build: h1 without topic words | Add "authentication" to the h1 or the line right under it | yes |
 | O04 | Heading levels never skip | h1 → h2 → h3 in order | ❌ | ✅ | Build: 1, 2, 3, 3, 3, 2 … in order | Done in this build | no |
 | O05 | Enough copy on the landing page | 600+ unique words in the HTML | ❌ | ✅ | Live 0, build 645 (just over) | Done; grows with content pages | no |
@@ -169,7 +169,7 @@ Organic search will be slow whatever is done: the domain was registered on 21 Oc
 
 ### Phase 1: this fortnight, ship and get counted
 
-1. Finish the title and description (O01, O02; the `TODO(human)` in `frontend/index.html`), mention "authentication" in the hero (O03), then commit and deploy the SEO build. Draft:
+1. ~~Write the title and description (O01, O02)~~ done 23 Oct in `frontend/index.html`; deploy it, and consider "authentication" in the h1 (O03). Now live in the page:
    - Title (52): `Secure Email & Password Authentication Demo · CKAuth`
    - Description (151): `Open-source auth for Express + TypeScript: verified email sign-up, rotating httpOnly JWT sessions, rate limits and no account enumeration. Try it live.`
 2. Verify `chiragdev.com` in Google Search Console and Bing Webmaster Tools with DNS TXT records, submit the sitemap and request indexing (C10, C11). Add an IndexNow ping to `deploy/deploy.sh` (C12).
