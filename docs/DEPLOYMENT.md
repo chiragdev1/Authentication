@@ -119,7 +119,7 @@ Because the app and the API share **one address**, the session cookies just work
 
 - [ ] **Hostinger** VPS (KVM 2), with access to hPanel
 - [ ] Access to the **DNS settings** for `chiragdev.com` (Hostinger, Cloudflare, or wherever you bought it)
-- [ ] **GitHub**, with admin rights on `chiragdev1/Authentication`
+- [ ] **GitHub**, with admin rights on `chiragdev1/ckauth`
 - [ ] **Resend** (<https://resend.com>), for email
 - [ ] **ImageKit** (<https://imagekit.io>), for profile pictures (optional; the app works without it)
 
@@ -324,7 +324,7 @@ ls -l .env api.env | grep -v -- '-rw-rw---- .* deploy'   # lists any file that i
 
 **7a. Create the deploy key.** Follow **[VPS-ACCESS.md, Part 3](VPS-ACCESS.md#part-3-github-actions--vps)**. You'll end up with a private key and a `known_hosts` line.
 
-**7b. Create the `production` environment.** 🌐 GitHub → `chiragdev1/Authentication` → **Settings → Environments → New environment** → name it exactly `production` → **Configure environment**.
+**7b. Create the `production` environment.** 🌐 GitHub → `chiragdev1/ckauth` → **Settings → Environments → New environment** → name it exactly `production` → **Configure environment**.
 
 **7c. Add the secrets.** On that page, under **Environment secrets**, choose **Add secret** for each of these:
 
