@@ -177,6 +177,17 @@ New entries go at the bottom, under a dated heading.
   - App pages load on demand. The main bundle went from 155.5 to 149.6 kB gzipped; React, the router and the header's Radix menu are most of what remains.
   - The two fonts on the first screen are preloaded, so they start downloading with the HTML.
 
+## 23 Oct 2026 · Search copy, speed and contrast
+**In short:** the home page now says what CKAuth is in search results, appears sooner, and every piece of its text is readable.
+
+- **Search title and description** now lead with the topic: "Secure Email & Password Authentication Demo · CKAuth", plus a 151-character description that ends with "Try it live." They're kept in step with the features (the "Search copy" rule in CLAUDE.md).
+- **Repo renamed** from `Authentication` to `ckauth` on GitHub, matching the product and domain; the local and VPS remotes point to the new URL. The README links the live demo.
+- **PageSpeed fixes** (mobile, Lighthouse 12, same machine, before → after):
+  - *Render-blocking requests* (files the browser must fetch before drawing anything) went from 2 to 0. The theme script is inlined and allowed by its SHA-256 hash in the CSP (the build fails if the hash in `deploy/ckauth.caddy` is stale), and the home page's CSS is inlined.
+  - *LCP render delay* (time from having the HTML to showing the main heading) went from ~800 ms to ~100 ms: the hero slides in but no longer fades in from opacity 0.
+  - *JavaScript on the landing page* went from 150 to 121 KiB gzip, and *unused JavaScript* from 79 to 56 KiB: the account menu (Radix dropdown + Floating UI) is lazy-loaded, since only signed-in users see it.
+  - *Contrast failures* went from 10 to 0, so accessibility went from 96 to 100. The light theme's `--primary` and `--success` are slightly darker, and muted text no longer has opacity modifiers.
+
 ---
 
 ## Lessons
@@ -186,10 +197,10 @@ Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.m
 Short-term work, roughly in order. Bracketed IDs such as [B01] point to tests in [docs/SEO-AUDIT.md](docs/SEO-AUDIT.md).
 
 - **SEO phase 1:**
-  - Finish the search title and description (the `TODO(human)` in `frontend/index.html`) and put "authentication" in the hero [O01–O03], then commit and deploy the SEO build.
+  - Deploy the new search title and description (written 23 Oct) [O01, O02]; consider "authentication" in the h1 itself, not only the badge above it [O03].
   - Verify `chiragdev.com` in Google Search Console and Bing Webmaster Tools (DNS TXT records cover every subdomain), submit `sitemap.xml`, request indexing, and check with Google's Rich Results Test [C10, C11]. Add an IndexNow ping to `deploy.sh` [C12].
   - Replace the Hostinger parked page on `chiragdev.com` with a portfolio that links to CKAuth [D02].
-  - Show the hero text without the opacity-0 fade-in, which delays the main content appearing [P02, A06]; fix the contrast failures [A02]; add a skip link [A03].
+  - Add a skip link [A03]. LCP is still ~2.2 s in the mobile lab [P02]: next steps are a smaller first-screen font load and a CDN [P09].
   - Stop the `/auth/me` + `/auth/refresh` 401 errors on every visit by a signed-out user [B01].
   - Add a CAA record, an AAAA (IPv6) record, COOP/CORP headers and a `/index.html` → `/` redirect [B06, P12, B07, C07].
   - Set the GitHub repo's homepage, description and topics; link the repo and API docs from the footer; add Person JSON-LD with `sameAs`; add PNG icons and a `site.webmanifest` [D05, O11, O08, O09].
@@ -238,6 +249,11 @@ Larger directions beyond Next up, roughly in order of value. Each one says what 
 **Quality and operations**
 - **Automated tests.** There is no test suite yet. Start with integration tests of every flow against a real Postgres and Redis in CI, including the race-condition and account-enumeration rules in CLAUDE.md.
 - **OpenAPI from the Zod models.** Generate a machine-readable API description from `models.ts`, so `docs/API.md` and a typed client can't drift from the code.
-- **Observability.** Structured JSON logs, request IDs, metrics (response times, error rates, rate-limit hits) and error tracking with alerts.
+- **Observability: activity logs, alerts and a stats dashboard.** Today Caddy writes an access log, the API has only scattered `console.log`/`console.error` calls, and neither compose file sets a size limit on container logs, so Docker keeps every line until the disk fills. The plan is layered, cheapest first:
+  - **Foundation (needed by every option).** Docker log rotation (`logging: max-size/max-file`) in both compose files; structured JSON logs with pino, with `redact` stripping `password`/`token` fields so the "never log secrets" rule can't be broken by accident; request IDs; and an `audit_events` table (sign-up, sign-in success/failure, verify, reset, session ended, avatar change, rate-limit hit), written in the *same* transaction as the action, so an action can never happen without its record. This also feeds the user-facing **Activity log** above.
+  - **Dashboard and alerts (recommended): Grafana Cloud's free tier.** An agent on the VPS sends logs and metrics; alerts go to email/Telegram. Uses almost no VPS memory and still alerts when the VPS itself is down. Trade-offs: 14–30 day retention, and users' emails/IPs go to a third party (mention it in a privacy policy).
+  - **Security: CrowdSec** (~100 MB) reads Caddy and SSH logs, spots brute force and scans, and blocks attacking IPs for every site on the VPS.
+  - **Alternatives considered:** (1) *built into CKAuth*: an admin page charting `audit_events`, Uptime Kuma for uptime alerts and a scheduled query for "too many failed sign-ins"; the lightest and most private option, but basic charts, and it can't see server-level events. (2) *Self-hosted Grafana + Loki + Prometheus + Alloy*: the industry standard and private, but ~1–1.5 GB RAM on a VPS shared with other sites, four more services to maintain, and Grafana must be locked down. Move here later if the VPS is upgraded; the app side doesn't change. (3) *Wazuh* for file integrity monitoring: needs 4–8 GB RAM, too heavy for this VPS.
+  - Keep at least one check (uptime or alerting) *outside* the VPS: a monitor on the server it watches can't report that server's death.
 - **Email templates and languages.** Branded, tested email templates, and translations for emails and the web app.
 - **Accessibility pass.** A full WCAG 2.2 AA review of the forms and dashboard, beyond the landing page covered in `docs/SEO-AUDIT.md`.

@@ -10,6 +10,7 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 - [Server and performance](#server-and-performance)
 - [Frontend](#frontend)
 - [Hosting and deployment](#hosting-and-deployment)
+- [Logs and monitoring](#logs-and-monitoring)
 - [Email delivery](#email-delivery)
 - [Search, speed and accessibility](#search-speed-and-accessibility)
 
@@ -108,7 +109,7 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 
 **CSRF (Cross-Site Request Forgery).** A malicious site making your browser send requests to another site where you're signed in. `SameSite` cookies prevent most of it.
 
-**CSP (Content Security Policy).** A header that tells the browser which scripts, styles and images it may load. CKAuth's CSP blocks inline scripts.
+**CSP (Content Security Policy).** A header that tells the browser which scripts, styles and images it may load. CKAuth's CSP blocks inline scripts, except the one theme script it names by **hash**: a fingerprint of the script's exact text (`'sha256-…'`), so changing even one character blocks it until the hash is updated.
 
 **HSTS (HTTP Strict Transport Security).** A header that tells the browser to always use HTTPS for the site.
 
@@ -194,6 +195,8 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 
 **Code-splitting / lazy loading.** Splitting the bundle so each page's code downloads only when that page is opened.
 
+**Render-blocking request.** A file (usually CSS or a script in `<head>`) the browser must download before it draws anything. Each one adds a network round trip before the first paint; inlining a small one into the HTML removes it.
+
 **Prerendering.** Turning a page into finished HTML at build time. Visitors and crawlers then get the content without running JavaScript first.
 
 **Hydration.** React taking over prerendered HTML in the browser and making it interactive. The browser's first render must match the HTML exactly, or React reports a *hydration mismatch*.
@@ -252,6 +255,30 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 **Breaking change.** A change that existing clients must adapt to, or they stop working. In commit messages it's marked with a `BREAKING CHANGE:` footer.
 
 **Environment variable.** A setting passed to the app from outside the code, such as `RESEND_API_KEY`.
+
+---
+
+## Logs and monitoring
+
+**Observability.** Being able to tell what a running system is doing, and why, from what it records: logs, metrics and alerts.
+
+**Structured log.** A log entry written as one JSON object, such as `{"event":"signin_failed","ip":"1.2.3.4"}`, instead of free text, so tools can filter, count and alert on it. **pino** is a fast structured logger for Node; its `redact` option removes fields like `password` before anything is written.
+
+**Audit log.** A permanent record of security-relevant actions (sign-ins, password resets, sessions ended), answering "what happened to this account?" Ordinary logs answer "is the server healthy?"
+
+**Request ID.** A unique ID given to each request and included in every log line it produces, so all the lines for one request can be found together.
+
+**Log rotation.** Capping how large logs grow by starting a new file at a size limit and deleting the oldest. Without it, logs eventually fill the disk.
+
+**Retention.** How long logs or metrics are kept before being deleted.
+
+**Metrics.** Numbers measured over time, such as requests per second, error rate or sign-ins per hour. **Prometheus** is the usual tool for storing them.
+
+**Grafana / Loki / Alloy.** Grafana draws dashboards and sends alerts; Loki stores and searches logs; Alloy is the agent that collects logs and metrics and sends them on. **Grafana Cloud** runs all of them as a hosted service.
+
+**Uptime monitor.** A service that requests the site every minute or so and alerts you when it stops answering. **Uptime Kuma** is a self-hosted one.
+
+**Intrusion detection.** Watching logs and system activity for signs of an attack. **CrowdSec** spots attacks such as brute force in logs and blocks the IPs; **Wazuh** also does *file integrity monitoring*, alerting when system files change.
 
 ---
 

@@ -136,6 +136,12 @@ Every real mistake made while building CKAuth, grouped by topic, with the rule i
 - **A page drawn by JavaScript looks empty to most crawlers.** Only Google runs the JavaScript, and later than the rest; link previews never do.
   → Prerender the public page (render it to HTML at build time) and hydrate it (React takes over the finished HTML in the browser).
   **Rule:** anything meant to be found or shared (content, title, meta description, Open Graph tags, which control link previews) must be in the HTML the server sends. Check with `curl`, not in the browser.
+- **A fade-in made the main heading count as late.** The hero started at opacity 0 and faded in over 700 ms. The HTML had arrived, but Chrome doesn't count text as painted until it's visible, so 80% of LCP (Largest Contentful Paint, when the main content appears) was waiting for the animation.
+  → Keep the slide-in, drop the fade.
+  **Rule:** the first screen's main text must be visible on the first frame. Animate position if you like, never opacity from 0.
+- **"Unused JavaScript" was mostly a menu nobody signed-out could open.** The account dropdown pulled Radix and Floating UI (the library that positions popups) into the bundle every visitor downloads.
+  → Lazy-load it (`React.lazy`), so only signed-in users fetch it.
+  **Rule:** UI only some users see (signed-in menus, dialogs, editors) goes in a lazy chunk if it brings a library with it.
 
 ## Process
 

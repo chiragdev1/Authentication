@@ -1,6 +1,7 @@
 // runs after both vite builds (package.json "build"). writes two pages into dist/:
 // - index.html: the home page rendered to real html, so crawlers and link previews see the content without running js
 // - app.html: the empty shell for every other route (the web Caddyfile serves it), which must not carry the home page's markup
+import { createHash } from 'node:crypto'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 
 const SITE_URL = 'https://ckauth.chiragdev.com'
@@ -19,7 +20,18 @@ const shell = await readFile(new URL('index.html', dist), 'utf8')
 const fonts = (await readdir(new URL('assets/', dist))).filter(name => /^(inter|cinzel)-latin-wght-normal-.+\.woff2$/.test(name))
 if(fonts.length !== 2) throw new Error(`prerender: expected the inter and cinzel latin fonts, found ${fonts.join(', ') || 'none'}`)
 const preloads = fonts.map(name => `<link rel="preload" href="/assets/${name}" as="font" type="font/woff2" crossorigin />`).join('\n    ')
-const appShell = replaceOnce(shell, '</head>', `  ${preloads}\n  </head>`)
+let appShell = replaceOnce(shell, '</head>', `  ${preloads}\n  </head>`)
+
+// the theme script runs before first paint, so as a separate file it costs a round trip before anything shows.
+// inlined, the csp must allow it by hash: deploy/ckauth.caddy carries 'sha256-…' in script-src, and the build fails
+// if they differ. the check is skipped where deploy/ isn't present (the web image builds from frontend/ alone)
+const themeScript = (await readFile(new URL('theme-init.js', dist), 'utf8')).trim()
+const themeHash = `'sha256-${createHash('sha256').update(themeScript).digest('base64')}'`
+const siteCaddy = await readFile(new URL('../../deploy/ckauth.caddy', import.meta.url), 'utf8').catch(() => null)
+if(siteCaddy !== null && !siteCaddy.includes(themeHash)) {
+  throw new Error(`prerender: public/theme-init.js changed; put ${themeHash} in script-src in deploy/ckauth.caddy`)
+}
+appShell = replaceOnce(appShell, '<script src="/theme-init.js"></script>', `<script>${themeScript}</script>`)
 
 // home-only head tags: the canonical url, and structured data that gives search results the site's name.
 // the description is taken from index.html so the two never drift apart
@@ -40,6 +52,12 @@ const homeHead = [
 ].join('\n    ')
 
 let home = replaceOnce(appShell, '</head>', `  ${homeHead}\n  </head>`)
+// the home page is the landing page, so its css comes inline instead of as a render-blocking request
+// (~11 kB gzip, already allowed by style-src 'unsafe-inline'). app.html keeps the cacheable stylesheet link
+const stylesheet = home.match(/<link rel="stylesheet" crossorigin href="\/assets\/([^"]+\.css)">/)
+if(!stylesheet) throw new Error('prerender: no stylesheet link in index.html')
+const css = await readFile(new URL(`assets/${stylesheet[1]}`, dist), 'utf8')
+home = replaceOnce(home, stylesheet[0], `<style>${css}</style>`)
 home = replaceOnce(home, '<div id="root"></div>', `<div id="root" data-prerendered="/">${render('/')}</div>`)
 
 await writeFile(new URL('app.html', dist), appShell)

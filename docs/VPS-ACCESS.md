@@ -165,7 +165,7 @@ cat ~/.ssh/github_ckauth.pub
 
 ### 2.3 Add it to the repo
 
-On GitHub, open **chiragdev1/Authentication → Settings → Deploy keys → Add deploy key**:
+On GitHub, open **chiragdev1/ckauth → Settings → Deploy keys → Add deploy key**:
 
 - **Title:** `vps (read-only)`
 - **Key:** paste the `.pub` line
@@ -203,7 +203,7 @@ SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU
 You can also check it at <https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints>. If they match, type `yes`. You should see:
 
 ```
-Hi chiragdev1/Authentication! You've successfully authenticated, but GitHub does not provide shell access.
+Hi chiragdev1/ckauth! You've successfully authenticated, but GitHub does not provide shell access.
 ```
 
 ### 2.5 Clone
@@ -211,9 +211,11 @@ Hi chiragdev1/Authentication! You've successfully authenticated, but GitHub does
 🖥️ VPS:
 
 ```bash
-git clone git@github-ckauth:chiragdev1/Authentication.git ~/Authentication
+git clone git@github-ckauth:chiragdev1/ckauth.git ~/Authentication
 cd ~/Authentication && git pull     # later, to update
 ```
+
+The repo was renamed from `Authentication` to `ckauth` on 23 Oct 2026. The folder keeps its old name, so existing paths still work. GitHub redirects the old URL, but point an existing clone at the new one: `git -C ~/Authentication remote set-url origin git@github-ckauth:chiragdev1/ckauth.git`.
 
 Note the host is `github-ckauth`, the alias, not `github.com`.
 

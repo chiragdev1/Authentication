@@ -75,8 +75,8 @@ Once a page is fetched, does it clearly say what it's about, in the title, headi
 
 | ID | Test | Must reach | Live | Build | Measured | Fix | Quick |
 |---|---|---|---|---|---|---|---|
-| O01 | Search title | 50–60 characters, topic words first | ❌ | ❌ | 30 characters, no topic word (your TODO is open) | e.g. "Secure Email & Password Authentication Demo · CKAuth" (52) | yes |
-| O02 | Meta description | 140–160 characters, topic word and a call to action | ❌ | ❌ | 101 characters, no "authentication" | Rewrite with the title (151-character draft in the summary) | yes |
+| O01 | Search title | 50–60 characters, topic words first | ❌ | ✅ | Live: 30 characters, no topic word. Fixed 23 Oct: "Secure Email & Password Authentication Demo · CKAuth" (52) | Deploy; not yet counted in the scores above | yes |
+| O02 | Meta description | 140–160 characters, topic word and a call to action | ❌ | ✅ | Live: 101 characters, no topic word. Fixed 23 Oct: 151 characters, topic first, ends "Try it live." | Deploy; not yet counted in the scores above | yes |
 | O03 | One h1 that names the topic | Exactly one h1 that says what the page is | ❌ | ❌ | Live: no h1 without JS. Build: h1 without topic words | Add "authentication" to the h1 or the line right under it | yes |
 | O04 | Heading levels never skip | h1 → h2 → h3 in order | ❌ | ✅ | Build: 1, 2, 3, 3, 3, 2 … in order | Done in this build | no |
 | O05 | Enough copy on the landing page | 600+ unique words in the HTML | ❌ | ✅ | Live 0, build 645 (just over) | Done; grows with content pages | no |
@@ -94,13 +94,13 @@ How quickly the page appears and becomes usable, especially on a phone over a sl
 | ID | Test | Must reach | Live | Build | Measured | Fix | Quick |
 |---|---|---|---|---|---|---|---|
 | P01 | Lighthouse performance, mobile | 95 or more | ✅ | ✅ | Live 96, build 97 | None needed | no |
-| P02 | Largest Contentful Paint, mobile lab | 1.8 s or less | ❌ | ❌ | Live 2.2 s, build 2.4 s; 81% is render delay from the hero fade-in | Show the hero h1 without the opacity-0 entrance | yes |
-| P03 | First Contentful Paint, mobile lab | 1.5 s or less | ❌ | ❌ | Live 2.2 s, build 1.8 s | Inline critical CSS; defer the rest | no |
+| P02 | Largest Contentful Paint, mobile lab | 1.8 s or less | ❌ | ❌ | Live 2.2 s. 23 Oct build: 2.1–2.3 s, render delay ~800 → ~100 ms (no more fade) | Smaller first-screen font load; CDN (P09) | yes |
+| P03 | First Contentful Paint, mobile lab | 1.5 s or less | ❌ | ❌ | Live 2.2 s. 23 Oct build: 1.5–1.7 s with CSS and theme script inlined | CDN (P09) | no |
 | P04 | Total Blocking Time | 50 ms or less | ✅ | ✅ | Live 0 ms, build 10 ms | None needed | no |
 | P05 | Cumulative Layout Shift | 0.02 or less | ✅ | ✅ | 0 and 0.001 | None needed | no |
-| P06 | Initial JavaScript | 100 kB gzip or less | ❌ | ❌ | Live 155.5 kB, build 149.6 kB | Drop Radix from the header until signed in; check lucide imports | no |
-| P07 | Unused JavaScript on the landing page | 20 KiB or less | ❌ | ❌ | Live 89 KiB, build 79 KiB | Same as P06 | no |
-| P08 | No render-blocking resources | Nothing blocks first paint | ❌ | ❌ | CSS and theme-init.js block | Inline the theme script hash in CSP; critical CSS | no |
+| P06 | Initial JavaScript | 100 kB gzip or less | ❌ | ❌ | Live 150 KiB. 23 Oct build: 121 KiB (account menu lazy-loaded) | Lazy-load more of the router/UI code | no |
+| P07 | Unused JavaScript on the landing page | 20 KiB or less | ❌ | ❌ | Live 79 KiB. 23 Oct build: 56 KiB | Same as P06 | no |
+| P08 | No render-blocking resources | Nothing blocks first paint | ❌ | ✅ | Fixed 23 Oct: theme script inlined (CSP hash), home CSS inlined | Deploy | no |
 | P09 | Server response time from a distance | TTFB 200 ms or less including TLS | ❌ | ❌ | 212–345 ms from this machine; one VPS, no CDN | Cloudflare in front (already in Next up) | no |
 | P10 | Real-user Core Web Vitals | Field data exists and passes | ❌ | ❌ | No field data (too few Chrome visitors) | Comes with traffic; track in Search Console | no |
 | P11 | Modern transport and caching | HTTP/2 + HTTP/3, compression, immutable assets | ✅ | ✅ | h2 + h3, zstd, 1-year immutable /assets | None needed | no |
@@ -112,12 +112,12 @@ Can everyone use the page, including people using screen readers, keyboards only
 
 | ID | Test | Must reach | Live | Build | Measured | Fix | Quick |
 |---|---|---|---|---|---|---|---|
-| A01 | Lighthouse accessibility score | 100 | ❌ | ❌ | 96 on both | Fix A02 | yes |
-| A02 | All text meets WCAG AA contrast | 4.5:1 for normal text | ❌ | ❌ | 10 elements; lowest 1.75:1 (footer salute), 2.54:1 wall labels, 3.09:1 "else 401" | Darken muted text tokens; drop opacity-40 and /70 on text | yes |
+| A01 | Lighthouse accessibility score | 100 | ❌ | ✅ | Live 96. 23 Oct build: 100 | Deploy | yes |
+| A02 | All text meets WCAG AA contrast | 4.5:1 for normal text | ❌ | ✅ | Live: 10 elements. Fixed 23 Oct: darker light `--primary`/`--success`, no opacity on text; lowest now 4.72:1 | Deploy | yes |
 | A03 | Skip-to-content link | First focusable element skips to main | ❌ | ❌ | None | Add one in Layout | yes |
 | A04 | Honours reduced motion | Animations off under prefers-reduced-motion | ✅ | ✅ | Global rule in index.css | None needed | no |
 | A05 | Language and landmarks | lang, header, nav, main, footer | ✅ | ✅ | All present | None needed | no |
-| A06 | Hero readable without waiting | No opacity-0 entrance on the main text | ❌ | ❌ | Hero text fades in over 700 ms | Same change as P02 | yes |
+| A06 | Hero readable without waiting | No opacity-0 entrance on the main text | ❌ | ✅ | Fixed 23 Oct: slides in, never starts transparent | Deploy | yes |
 
 ### Security & practice
 
@@ -169,7 +169,7 @@ Organic search will be slow whatever is done: the domain was registered on 21 Oc
 
 ### Phase 1: this fortnight, ship and get counted
 
-1. Finish the title and description (O01, O02; the `TODO(human)` in `frontend/index.html`), mention "authentication" in the hero (O03), then commit and deploy the SEO build. Draft:
+1. ~~Write the title and description (O01, O02)~~ done 23 Oct in `frontend/index.html`; deploy it, and consider "authentication" in the h1 (O03). Now live in the page:
    - Title (52): `Secure Email & Password Authentication Demo · CKAuth`
    - Description (151): `Open-source auth for Express + TypeScript: verified email sign-up, rotating httpOnly JWT sessions, rate limits and no account enumeration. Try it live.`
 2. Verify `chiragdev.com` in Google Search Console and Bing Webmaster Tools with DNS TXT records, submit the sitemap and request indexing (C10, C11). Add an IndexNow ping to `deploy/deploy.sh` (C12).
