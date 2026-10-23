@@ -109,7 +109,7 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 
 **CSRF (Cross-Site Request Forgery).** A malicious site making your browser send requests to another site where you're signed in. `SameSite` cookies prevent most of it.
 
-**CSP (Content Security Policy).** A header that tells the browser which scripts, styles and images it may load. CKAuth's CSP blocks inline scripts.
+**CSP (Content Security Policy).** A header that tells the browser which scripts, styles and images it may load. CKAuth's CSP blocks inline scripts, except the one theme script it names by **hash**: a fingerprint of the script's exact text (`'sha256-…'`), so changing even one character blocks it until the hash is updated.
 
 **HSTS (HTTP Strict Transport Security).** A header that tells the browser to always use HTTPS for the site.
 
@@ -195,6 +195,8 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 
 **Code-splitting / lazy loading.** Splitting the bundle so each page's code downloads only when that page is opened.
 
+**Render-blocking request.** A file (usually CSS or a script in `<head>`) the browser must download before it draws anything. Each one adds a network round trip before the first paint; inlining a small one into the HTML removes it.
+
 **Prerendering.** Turning a page into finished HTML at build time. Visitors and crawlers then get the content without running JavaScript first.
 
 **Hydration.** React taking over prerendered HTML in the browser and making it interactive. The browser's first render must match the HTML exactly, or React reports a *hydration mismatch*.
@@ -256,8 +258,6 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 
 ---
 
-## Email delivery
-
 ## Logs and monitoring
 
 **Observability.** Being able to tell what a running system is doing, and why, from what it records: logs, metrics and alerts.
@@ -281,6 +281,8 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 **Intrusion detection.** Watching logs and system activity for signs of an attack. **CrowdSec** spots attacks such as brute force in logs and blocks the IPs; **Wazuh** also does *file integrity monitoring*, alerting when system files change.
 
 ---
+
+## Email delivery
 
 **Resend.** The service CKAuth sends its emails through.
 

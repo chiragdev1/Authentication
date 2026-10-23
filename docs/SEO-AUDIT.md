@@ -94,13 +94,13 @@ How quickly the page appears and becomes usable, especially on a phone over a sl
 | ID | Test | Must reach | Live | Build | Measured | Fix | Quick |
 |---|---|---|---|---|---|---|---|
 | P01 | Lighthouse performance, mobile | 95 or more | ✅ | ✅ | Live 96, build 97 | None needed | no |
-| P02 | Largest Contentful Paint, mobile lab | 1.8 s or less | ❌ | ❌ | Live 2.2 s, build 2.4 s; 81% is render delay from the hero fade-in | Show the hero h1 without the opacity-0 entrance | yes |
-| P03 | First Contentful Paint, mobile lab | 1.5 s or less | ❌ | ❌ | Live 2.2 s, build 1.8 s | Inline critical CSS; defer the rest | no |
+| P02 | Largest Contentful Paint, mobile lab | 1.8 s or less | ❌ | ❌ | Live 2.2 s. 23 Oct build: 2.1–2.3 s, render delay ~800 → ~100 ms (no more fade) | Smaller first-screen font load; CDN (P09) | yes |
+| P03 | First Contentful Paint, mobile lab | 1.5 s or less | ❌ | ❌ | Live 2.2 s. 23 Oct build: 1.5–1.7 s with CSS and theme script inlined | CDN (P09) | no |
 | P04 | Total Blocking Time | 50 ms or less | ✅ | ✅ | Live 0 ms, build 10 ms | None needed | no |
 | P05 | Cumulative Layout Shift | 0.02 or less | ✅ | ✅ | 0 and 0.001 | None needed | no |
-| P06 | Initial JavaScript | 100 kB gzip or less | ❌ | ❌ | Live 155.5 kB, build 149.6 kB | Drop Radix from the header until signed in; check lucide imports | no |
-| P07 | Unused JavaScript on the landing page | 20 KiB or less | ❌ | ❌ | Live 89 KiB, build 79 KiB | Same as P06 | no |
-| P08 | No render-blocking resources | Nothing blocks first paint | ❌ | ❌ | CSS and theme-init.js block | Inline the theme script hash in CSP; critical CSS | no |
+| P06 | Initial JavaScript | 100 kB gzip or less | ❌ | ❌ | Live 150 KiB. 23 Oct build: 121 KiB (account menu lazy-loaded) | Lazy-load more of the router/UI code | no |
+| P07 | Unused JavaScript on the landing page | 20 KiB or less | ❌ | ❌ | Live 79 KiB. 23 Oct build: 56 KiB | Same as P06 | no |
+| P08 | No render-blocking resources | Nothing blocks first paint | ❌ | ✅ | Fixed 23 Oct: theme script inlined (CSP hash), home CSS inlined | Deploy | no |
 | P09 | Server response time from a distance | TTFB 200 ms or less including TLS | ❌ | ❌ | 212–345 ms from this machine; one VPS, no CDN | Cloudflare in front (already in Next up) | no |
 | P10 | Real-user Core Web Vitals | Field data exists and passes | ❌ | ❌ | No field data (too few Chrome visitors) | Comes with traffic; track in Search Console | no |
 | P11 | Modern transport and caching | HTTP/2 + HTTP/3, compression, immutable assets | ✅ | ✅ | h2 + h3, zstd, 1-year immutable /assets | None needed | no |
@@ -112,12 +112,12 @@ Can everyone use the page, including people using screen readers, keyboards only
 
 | ID | Test | Must reach | Live | Build | Measured | Fix | Quick |
 |---|---|---|---|---|---|---|---|
-| A01 | Lighthouse accessibility score | 100 | ❌ | ❌ | 96 on both | Fix A02 | yes |
-| A02 | All text meets WCAG AA contrast | 4.5:1 for normal text | ❌ | ❌ | 10 elements; lowest 1.75:1 (footer salute), 2.54:1 wall labels, 3.09:1 "else 401" | Darken muted text tokens; drop opacity-40 and /70 on text | yes |
+| A01 | Lighthouse accessibility score | 100 | ❌ | ✅ | Live 96. 23 Oct build: 100 | Deploy | yes |
+| A02 | All text meets WCAG AA contrast | 4.5:1 for normal text | ❌ | ✅ | Live: 10 elements. Fixed 23 Oct: darker light `--primary`/`--success`, no opacity on text; lowest now 4.72:1 | Deploy | yes |
 | A03 | Skip-to-content link | First focusable element skips to main | ❌ | ❌ | None | Add one in Layout | yes |
 | A04 | Honours reduced motion | Animations off under prefers-reduced-motion | ✅ | ✅ | Global rule in index.css | None needed | no |
 | A05 | Language and landmarks | lang, header, nav, main, footer | ✅ | ✅ | All present | None needed | no |
-| A06 | Hero readable without waiting | No opacity-0 entrance on the main text | ❌ | ❌ | Hero text fades in over 700 ms | Same change as P02 | yes |
+| A06 | Hero readable without waiting | No opacity-0 entrance on the main text | ❌ | ✅ | Fixed 23 Oct: slides in, never starts transparent | Deploy | yes |
 
 ### Security & practice
 

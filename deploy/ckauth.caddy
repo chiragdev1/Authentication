@@ -30,8 +30,9 @@ ckauth.chiragdev.com {
 		# email links carry tokens in the query string; never leak them to other sites
 		Referrer-Policy "no-referrer"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
-		# avatars are served from imagekit; everything else is same-origin
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https://ik.imagekit.io; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		# avatars are served from imagekit; everything else is same-origin. the one inline script is the theme script
+		# (frontend/public/theme-init.js), allowed by its hash; frontend's build fails if the hash is stale
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https://ik.imagekit.io; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-jz767lDpfSctHKI30WlmhVXmEec4TZVh3nx1B0CVeDo='; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 		-Server
 	}
 

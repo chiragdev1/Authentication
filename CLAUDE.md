@@ -44,7 +44,7 @@ There is no test suite. Verify changes by building, then running the real flow a
 - `frontend/src/lib/use-form.ts` + `validation.ts`: every form's state, inline errors (mirroring `models.ts`) and API error → field mapping
 - `frontend/src/pages/`: one file per route; routes for email links are fixed by the API (`/verify-email`, `/reset-password`, `/sign-in`, `/forgot-password`). Each page sets its tab title with `useDocumentTitle()`
 - `frontend/src/app.tsx`: the routes and provider tree, shared by `main.tsx` (browser) and `entry-server.tsx` (build). Every page except home is lazy-loaded. A new route must also go in the `@app` list in `frontend/Caddyfile`
-- **SEO / prerender:** `pnpm build` also renders `/` in Node (`scripts/prerender.js`) into `dist/index.html`, and writes `dist/app.html`, the empty shell every other route gets. So anything the home page renders must work without `window`/`document`, and must render the same on the first client pass: no theme-, auth- or date-dependent markup, since React doesn't fix mismatched attributes when it hydrates. Only `/` is indexed (`public/robots.txt`, `sitemap.xml`); the meta/OG tags are in `index.html`, and `og-image.svg` is the source of `public/og.png`
+- **SEO / prerender:** `pnpm build` also renders `/` in Node (`scripts/prerender.js`) into `dist/index.html`, and writes `dist/app.html`, the empty shell every other route gets. So anything the home page renders must work without `window`/`document`, and must render the same on the first client pass: no theme-, auth- or date-dependent markup, since React doesn't fix mismatched attributes when it hydrates. Only `/` is indexed (`public/robots.txt`, `sitemap.xml`); the meta/OG tags are in `index.html`, and `og-image.svg` is the source of `public/og.png`. The build also inlines `public/theme-init.js` into both pages (the CSP allows it by the SHA-256 hash in `deploy/ckauth.caddy`; the build fails with the new hash if they differ) and inlines the CSS into the home page only. Signed-in-only UI that pulls in big libraries (like `user-menu.tsx`) is lazy-loaded
 - `Dockerfile` (api image), `frontend/Dockerfile` + `frontend/Caddyfile` (web image: internal static server on :8080, no TLS; app routes → `app.html` + `noindex`, unknown paths → real 404)
 - `deploy/compose.yml` (CKAuth stack; `db` only on the `internal` network, `api`/`web` also on the external `edge` network), `deploy/deploy.sh` (runs on the VPS), `deploy/ckauth.caddy` (public routing + security headers), `deploy/edge/` (shared proxy)
 - `.github/workflows/api.yml`, `web.yml` → reusable `deploy.yml`
@@ -95,10 +95,10 @@ if(!validationResult.success) {
 - Ending a session revokes the refresh token, but access tokens stay valid until they expire (there is no access-token denylist).
 - **SEO and traffic** (full list with test IDs in `docs/SEO-AUDIT.md`; this build scores 33/100 on its strict tests):
   - The domain is new (registered 21 Oct 2026), `chiragdev.com` itself is a Hostinger parked page, no sites link in yet, and `/` is the only indexable page.
-  - The hero's `animate-in fade-in` starts at opacity 0, which delays LCP (2.4 s mobile lab).
+  - LCP is ~2.2 s in the mobile lab (target 1.8 s); the hero no longer fades in, so what's left is network and font loading.
   - Every anonymous visit logs two 401s (`/auth/me`, then `/auth/refresh`).
-  - Ten text elements fail WCAG AA contrast (muted `/70`, `opacity-40`, the wall labels); there's no skip link.
-  - The landing bundle is ~150 kB gzip, with ~79 KiB of it unused there; the CSS and `theme-init.js` block rendering.
+  - There's no skip link. Contrast passes WCAG AA; keep it that way by not putting opacity modifiers on text.
+  - The landing page loads ~121 KiB of JavaScript (gzip), ~56 KiB of it unused there (mostly React Router and Tailwind Merge).
   - `/index.html` answers 200 alongside `/` (only the canonical tag deduplicates them).
   - No CDN, no IPv6, no CAA record, no COOP/CORP; HSTS has no `includeSubDomains`/preload; the CSP still allows inline styles.
   - DMARC is `p=none` with no reports; there's no analytics or uptime monitoring.

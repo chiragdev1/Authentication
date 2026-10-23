@@ -1,12 +1,12 @@
-import { Suspense } from 'react'
-import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router'
-import { LayoutDashboard, LogOut } from 'lucide-react'
+import { lazy, Suspense } from 'react'
+import { Link, Navigate, Outlet, useLocation } from 'react-router'
 import { useAuth } from '@/lib/auth.tsx'
 import { Logo, Spinner } from '@/components/brand.tsx'
 import { ThemeToggle } from '@/components/theme-toggle.tsx'
-import { UserAvatar } from '@/components/user-avatar.tsx'
 import { Button } from '@/components/ui/button.tsx'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu.tsx'
+
+// signed-in only, so its menu code stays out of the bundle every visitor downloads (user-menu.tsx)
+const UserMenu = lazy(() => import('@/components/user-menu.tsx'))
 
 export function Layout() {
   return (
@@ -44,7 +44,9 @@ function SiteHeader() {
           {loading ? (
             <div className="h-9 w-24" />
           ) : user ? (
-            <UserMenu />
+            <Suspense fallback={<div className="size-9" />}>
+              <UserMenu />
+            </Suspense>
           ) : (
             <>
               <Button asChild variant="ghost" className="hidden sm:inline-flex">
@@ -61,40 +63,6 @@ function SiteHeader() {
   )
 }
 
-function UserMenu() {
-  const { user, signOut } = useAuth()
-  const navigate = useNavigate()
-  if(!user) return null
-
-  async function handleSignOut() {
-    await signOut()
-    navigate('/', { replace: true })
-  }
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button className="rounded-full focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none" aria-label="Account menu">
-          <UserAvatar user={user} className="size-9" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="font-normal">
-          <p className="truncate font-medium">{[user.firstName, user.lastName].filter(Boolean).join(' ')}</p>
-          <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link to="/dashboard"><LayoutDashboard />Dashboard</Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={handleSignOut}>
-          <LogOut />Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
 function SiteFooter() {
   return (
     <footer className="border-t border-border/70">
@@ -102,7 +70,7 @@ function SiteFooter() {
         <p className="font-display tracking-[0.2em] uppercase">
           © {new Date().getFullYear()} CKAuth · Hold the wall
           {/* "dedicate your hearts": the salute, for whoever notices */}
-          <span lang="ja" title="Dedicate your hearts" className="ml-3 tracking-normal normal-case opacity-40 transition-opacity hover:opacity-100">心臓を捧げよ</span>
+          <span lang="ja" title="Dedicate your hearts" className="ml-3 tracking-normal normal-case">心臓を捧げよ</span>
         </p>
         <div className="flex gap-5">
           <Link to="/sign-in" className="hover:text-foreground">Sign in</Link>

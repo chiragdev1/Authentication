@@ -74,7 +74,8 @@ function Hero() {
       <div aria-hidden className="bg-wall pointer-events-none absolute inset-0 -z-10" />
 
       <div className="mx-auto grid max-w-6xl items-center gap-14 px-4 py-20 sm:px-6 sm:py-28 lg:grid-cols-[1.1fr_1fr]">
-        <div className="animate-in fade-in slide-in-from-bottom-2 duration-700">
+        {/* slides in but never fades: text that starts at opacity 0 doesn't count as painted, which delays lcp by the whole fade */}
+        <div className="animate-in slide-in-from-bottom-2 duration-700">
           <Badge variant="outline" className="gap-1.5 bg-card px-3 py-1">
             <ShieldCheck className="text-primary" />Authentication &amp; authorization
           </Badge>
@@ -126,7 +127,7 @@ function RequestCard() {
                     <p className="text-sm font-medium">{label}</p>
                     <p className="text-xs text-muted-foreground">{detail}</p>
                   </div>
-                  {fails && <span className="font-mono text-xs text-muted-foreground/70">else {fails}</span>}
+                  {fails && <span className="font-mono text-xs text-muted-foreground">else {fails}</span>}
                 </li>
               ))}
             </ul>
@@ -205,7 +206,7 @@ function Defenses() {
         <div className="mt-16 grid gap-6 md:grid-cols-3">
           {defenses.map(({ wall, name, icon: Icon, summary, points }) => (
             <article key={name} className="dossier group relative flex flex-col rounded-2xl border bg-card p-7 transition-all duration-300 hover:-translate-y-1">
-              <span aria-hidden className="font-display absolute top-6 right-7 text-sm font-semibold tracking-[0.3em] text-muted-foreground/60 uppercase transition-colors group-hover:text-primary">Wall {wall}</span>
+              <span aria-hidden className="font-display absolute top-6 right-7 text-sm font-semibold tracking-[0.3em] text-muted-foreground uppercase transition-colors group-hover:text-primary">Wall {wall}</span>
               <span className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <Icon className="size-5" />
               </span>

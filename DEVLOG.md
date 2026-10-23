@@ -177,6 +177,17 @@ New entries go at the bottom, under a dated heading.
   - App pages load on demand. The main bundle went from 155.5 to 149.6 kB gzipped; React, the router and the header's Radix menu are most of what remains.
   - The two fonts on the first screen are preloaded, so they start downloading with the HTML.
 
+## 23 Oct 2026 · Search copy, speed and contrast
+**In short:** the home page now says what CKAuth is in search results, appears sooner, and every piece of its text is readable.
+
+- **Search title and description** now lead with the topic: "Secure Email & Password Authentication Demo · CKAuth", plus a 151-character description that ends with "Try it live." They're kept in step with the features (the "Search copy" rule in CLAUDE.md).
+- **Repo renamed** from `Authentication` to `ckauth` on GitHub, matching the product and domain; the local and VPS remotes point to the new URL. The README links the live demo.
+- **PageSpeed fixes** (mobile, Lighthouse 12, same machine, before → after):
+  - *Render-blocking requests* (files the browser must fetch before drawing anything) went from 2 to 0. The theme script is inlined and allowed by its SHA-256 hash in the CSP (the build fails if the hash in `deploy/ckauth.caddy` is stale), and the home page's CSS is inlined.
+  - *LCP render delay* (time from having the HTML to showing the main heading) went from ~800 ms to ~100 ms: the hero slides in but no longer fades in from opacity 0.
+  - *JavaScript on the landing page* went from 150 to 121 KiB gzip, and *unused JavaScript* from 79 to 56 KiB: the account menu (Radix dropdown + Floating UI) is lazy-loaded, since only signed-in users see it.
+  - *Contrast failures* went from 10 to 0, so accessibility went from 96 to 100. The light theme's `--primary` and `--success` are slightly darker, and muted text no longer has opacity modifiers.
+
 ---
 
 ## Lessons
@@ -189,7 +200,7 @@ Short-term work, roughly in order. Bracketed IDs such as [B01] point to tests in
   - Deploy the new search title and description (written 23 Oct) [O01, O02]; consider "authentication" in the h1 itself, not only the badge above it [O03].
   - Verify `chiragdev.com` in Google Search Console and Bing Webmaster Tools (DNS TXT records cover every subdomain), submit `sitemap.xml`, request indexing, and check with Google's Rich Results Test [C10, C11]. Add an IndexNow ping to `deploy.sh` [C12].
   - Replace the Hostinger parked page on `chiragdev.com` with a portfolio that links to CKAuth [D02].
-  - Show the hero text without the opacity-0 fade-in, which delays the main content appearing [P02, A06]; fix the contrast failures [A02]; add a skip link [A03].
+  - Add a skip link [A03]. LCP is still ~2.2 s in the mobile lab [P02]: next steps are a smaller first-screen font load and a CDN [P09].
   - Stop the `/auth/me` + `/auth/refresh` 401 errors on every visit by a signed-out user [B01].
   - Add a CAA record, an AAAA (IPv6) record, COOP/CORP headers and a `/index.html` → `/` redirect [B06, P12, B07, C07].
   - Set the GitHub repo's homepage, description and topics; link the repo and API docs from the footer; add Person JSON-LD with `sameAs`; add PNG icons and a `site.webmanifest` [D05, O11, O08, O09].
