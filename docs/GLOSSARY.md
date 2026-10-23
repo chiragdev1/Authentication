@@ -10,6 +10,7 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 - [Server and performance](#server-and-performance)
 - [Frontend](#frontend)
 - [Hosting and deployment](#hosting-and-deployment)
+- [Logs and monitoring](#logs-and-monitoring)
 - [Email delivery](#email-delivery)
 - [Search, speed and accessibility](#search-speed-and-accessibility)
 
@@ -256,6 +257,30 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 ---
 
 ## Email delivery
+
+## Logs and monitoring
+
+**Observability.** Being able to tell what a running system is doing, and why, from what it records: logs, metrics and alerts.
+
+**Structured log.** A log entry written as one JSON object, such as `{"event":"signin_failed","ip":"1.2.3.4"}`, instead of free text, so tools can filter, count and alert on it. **pino** is a fast structured logger for Node; its `redact` option removes fields like `password` before anything is written.
+
+**Audit log.** A permanent record of security-relevant actions (sign-ins, password resets, sessions ended), answering "what happened to this account?" Ordinary logs answer "is the server healthy?"
+
+**Request ID.** A unique ID given to each request and included in every log line it produces, so all the lines for one request can be found together.
+
+**Log rotation.** Capping how large logs grow by starting a new file at a size limit and deleting the oldest. Without it, logs eventually fill the disk.
+
+**Retention.** How long logs or metrics are kept before being deleted.
+
+**Metrics.** Numbers measured over time, such as requests per second, error rate or sign-ins per hour. **Prometheus** is the usual tool for storing them.
+
+**Grafana / Loki / Alloy.** Grafana draws dashboards and sends alerts; Loki stores and searches logs; Alloy is the agent that collects logs and metrics and sends them on. **Grafana Cloud** runs all of them as a hosted service.
+
+**Uptime monitor.** A service that requests the site every minute or so and alerts you when it stops answering. **Uptime Kuma** is a self-hosted one.
+
+**Intrusion detection.** Watching logs and system activity for signs of an attack. **CrowdSec** spots attacks such as brute force in logs and blocks the IPs; **Wazuh** also does *file integrity monitoring*, alerting when system files change.
+
+---
 
 **Resend.** The service CKAuth sends its emails through.
 
