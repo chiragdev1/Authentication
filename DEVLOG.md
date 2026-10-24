@@ -188,6 +188,16 @@ New entries go at the bottom, under a dated heading.
   - *JavaScript on the landing page* went from 150 to 121 KiB gzip, and *unused JavaScript* from 79 to 56 KiB: the account menu (Radix dropdown + Floating UI) is lazy-loaded, since only signed-in users see it.
   - *Contrast failures* went from 10 to 0, so accessibility went from 96 to 100. The light theme's `--primary` and `--success` are slightly darker, and muted text no longer has opacity modifiers.
 
+## 24 Oct 2026 · A landing page for small business owners, in English and Hindi
+**In short:** the home page now speaks to small business owners in India instead of developers, in plain words and in Hindi as well as English.
+
+- **New message.** CKAuth is introduced as "your website's security guard", with features named by what they do for the owner ("Stops anyone guessing passwords") and compared to things they already trust: a bank locker, an ATM PIN, an OTP. The messaging borrows from Devin's and Chai Prep's landing pages (the product as a team member; one clear path; promise the outcome). The full copy and its rules are in `frontend/content/landing-page.md`; the page reads it from `src/pages/home-copy.ts`.
+- **New sections:** a demo sign-in screen in the hero (what a shop's customer sees, and what CKAuth checks), a section for web developers linking to the GitHub repo, placeholder pricing (Free, ₹99/month, ₹999/year, shown as "coming soon" under a "free for now" banner) and an FAQ built on `<details>`, so it works without JavaScript.
+- **Hindi.** An English/हिंदी switch in the header (`lib/language.tsx`) changes the page, menu and footer. The page always renders in English first, so the prerendered HTML hydrates cleanly, then applies a saved choice.
+- **Hindi readability.** Devanagari, the script Hindi is written in, at English settings looked small and cramped. The Noto Sans Devanagari font is now bundled, scaled up 12% with `size-adjust` and loaded only when Hindi appears (`unicode-range`). Hindi text also gets taller lines, no letter-spacing, slightly bigger small text and darker grey text.
+- **Design.** Chosen from three looks in the design lab (Dusk, Guard and Chai): **Guard**, slate and ember, with Inter for headings. Cinzel, the old all-caps heading font, is gone. The app pages lost their soldier wording ("Enlist", "Take the oath", "Garrison HQ") for plain words, since shop owners land on them straight from the new page.
+- **Search copy:** "Secure Website Login for Small Businesses in India · CKAuth" plus a matching description and share image (`og.png`).
+
 ---
 
 ## Lessons
@@ -197,7 +207,9 @@ Mistakes and the rules learned from them are kept topic by topic in [LEARNINGS.m
 Short-term work, roughly in order. Bracketed IDs such as [B01] point to tests in [docs/SEO-AUDIT.md](docs/SEO-AUDIT.md).
 
 - **SEO phase 1:**
-  - Deploy the new search title and description (written 23 Oct) [O01, O02]; consider "authentication" in the h1 itself, not only the badge above it [O03].
+  - Deploy the small-business landing page and its search copy (24 Oct) [O01, O02]. Re-run the SEO audit against it: the page now targets "website login security for small businesses" rather than "authentication" [O03].
+  - Replace the placeholder pricing with real plans before taking payments, and build or drop the paid-plan features it lists (priority email help, the shop's name on login emails, early access).
+  - Translate the app pages (sign-up, sign-in, emails) into Hindi, so the language choice carries past the home page.
   - Verify `chiragdev.com` in Google Search Console and Bing Webmaster Tools (DNS TXT records cover every subdomain), submit `sitemap.xml`, request indexing, and check with Google's Rich Results Test [C10, C11]. Add an IndexNow ping to `deploy.sh` [C12].
   - Replace the Hostinger parked page on `chiragdev.com` with a portfolio that links to CKAuth [D02].
   - Add a skip link [A03]. LCP is still ~2.2 s in the mobile lab [P02]: next steps are a smaller first-screen font load and a CDN [P09].

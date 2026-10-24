@@ -31,9 +31,9 @@ export function SignUp() {
   if(sentTo) {
     return (
       <AuthShell
-        eyebrow="Orders dispatched"
+        eyebrow="Check your email"
         title="Check your inbox"
-        subtitle={<>We've sent a message to <strong className="break-all text-foreground">{sentTo}</strong>. Follow the link in it to finish enlisting.</>}
+        subtitle={<>We've sent a message to <strong className="break-all text-foreground">{sentTo}</strong>. Open the link in it to finish signing up.</>}
         footer={<>Wrong address? <button type="button" onClick={() => setSentTo(null)} className="font-medium text-primary hover:underline">Start again</button></>}
       >
         <div className="flex flex-col items-center gap-5 text-center">
@@ -48,10 +48,10 @@ export function SignUp() {
 
   return (
     <AuthShell
-      eyebrow="104th Cadet Corps · Enlistment"
+      eyebrow="Free to try"
       title="Create your account"
       subtitle="Join in under a minute. We'll verify your email before anything else."
-      footer={<>Already enlisted? <Link to="/sign-in" className="font-medium text-primary hover:underline">Sign in</Link></>}
+      footer={<>Already have an account? <Link to="/sign-in" className="font-medium text-primary hover:underline">Sign in</Link></>}
     >
       <form ref={form.formRef} onSubmit={form.onSubmit} noValidate className="space-y-5">
         {form.formError && <FormAlert kind="error">{form.formError}</FormAlert>}
@@ -61,8 +61,8 @@ export function SignUp() {
         </div>
         <TextField label="Email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" error={form.errors.email} {...form.register('email')} />
         <PasswordField label="Password" autoComplete="new-password" showStrength error={form.errors.password} {...form.register('password')} />
-        <Button type="submit" size="lg" disabled={form.pending} className="font-display w-full tracking-[0.2em] uppercase">
-          {form.pending ? 'Enlisting…' : 'Enlist'}
+        <Button type="submit" size="lg" disabled={form.pending} className="w-full">
+          {form.pending ? 'Creating your account…' : 'Create account'}
         </Button>
       </form>
     </AuthShell>

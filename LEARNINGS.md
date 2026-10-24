@@ -143,6 +143,12 @@ Every real mistake made while building CKAuth, grouped by topic, with the rule i
   → Lazy-load it (`React.lazy`), so only signed-in users fetch it.
   **Rule:** UI only some users see (signed-in menus, dialogs, editors) goes in a lazy chunk if it brings a library with it.
 
+## Languages
+
+- **Hindi was harder to read than the English beside it.** Same font size, line height and letter-spacing as English, with the system's fallback font. Devanagari letters hang from a top line and carry marks above and below, so at the same size they looked a size smaller, the lines crowded each other, and letter-spacing cut the top line into pieces.
+  → Bundle Noto Sans Devanagari, scale it with `size-adjust: 112%`, load it only for Devanagari characters (`unicode-range`), and give `:lang(hi)` taller lines, no letter-spacing, slightly bigger small text and darker grey text.
+  **Rule:** a second script needs its own typography, not just a translation. Mark the text with `lang`, and tune size, line height and spacing for that script.
+
 ## Process
 
 - Commit messages for behaviour or security changes need a body explaining *why*, plus a `BREAKING CHANGE:` footer when the API changes. One-line messages are only for trivial commits.

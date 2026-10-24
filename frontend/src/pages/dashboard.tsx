@@ -45,8 +45,8 @@ export function Dashboard() {
           <div className="dossier flex items-start gap-4 rounded-2xl border border-success/40 bg-success/10 p-5 animate-in fade-in slide-in-from-top-2">
             <ShieldCheck className="mt-0.5 size-6 shrink-0 text-success" />
             <div className="flex-1">
-              <p className="font-display text-lg font-semibold">Enlistment complete</p>
-              <p className="text-sm text-muted-foreground">Your email is verified and you're signed in. Welcome inside the walls, {user.firstName}. Your heart is dedicated.</p>
+              <p className="font-display text-lg font-semibold">You're all set</p>
+              <p className="text-sm text-muted-foreground">Your email is verified and you're signed in. Welcome, {user.firstName}.</p>
             </div>
             <button type="button" onClick={() => setWelcome(false)} aria-label="Dismiss" className="rounded p-1 text-muted-foreground hover:text-foreground">
               <X className="size-4" />
@@ -56,7 +56,7 @@ export function Dashboard() {
 
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="eyebrow">Garrison HQ · Command post</p>
+            <p className="eyebrow">Your account</p>
             <h1 className="font-display mt-1 text-4xl font-semibold">Hi, {user.firstName}</h1>
             <p className="mt-1 text-sm text-muted-foreground">Manage your profile and keep your account secure.</p>
           </div>
@@ -179,7 +179,7 @@ function ChangePasswordCard() {
           <PasswordField label="Current password" autoComplete="current-password" error={form.errors.currentPassword} {...form.register('currentPassword')} />
           <PasswordField label="New password" autoComplete="new-password" showStrength error={form.errors.newPassword} {...form.register('newPassword')} />
           <PasswordField label="Confirm new password" autoComplete="new-password" error={form.errors.confirmPassword} {...form.register('confirmPassword')} />
-          <Button type="submit" disabled={form.pending} className="font-display tracking-[0.2em] uppercase">
+          <Button type="submit" disabled={form.pending}>
             {form.pending ? 'Updating…' : 'Update password'}
           </Button>
         </form>

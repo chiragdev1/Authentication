@@ -1,6 +1,9 @@
 import { lazy, Suspense } from 'react'
 import { Link, Navigate, Outlet, useLocation } from 'react-router'
+import { Languages } from 'lucide-react'
 import { useAuth } from '@/lib/auth.tsx'
+import { useLanguage } from '@/lib/language.tsx'
+import { CONTACT_EMAIL, homeCopy } from '@/pages/home-copy.ts'
 import { Logo, Spinner } from '@/components/brand.tsx'
 import { ThemeToggle } from '@/components/theme-toggle.tsx'
 import { Button } from '@/components/ui/button.tsx'
@@ -26,20 +29,29 @@ export function Layout() {
 function SiteHeader() {
   const { user, loading } = useAuth()
   const { pathname } = useLocation()
+  const { language, setLanguage } = useLanguage()
   const onHome = pathname === '/'
+  const nav = homeCopy[language].nav
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur-md supports-backdrop-filter:bg-background/65">
+    <header lang={language} className="sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur-md supports-backdrop-filter:bg-background/65">
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
         <Logo />
         {onHome && (
-          <div className="font-display hidden items-center gap-7 text-sm tracking-[0.15em] text-muted-foreground uppercase md:flex">
-            <a href="#defenses" className="transition-colors hover:text-foreground">Defenses</a>
-            <a href="#how-it-works" className="transition-colors hover:text-foreground">How it works</a>
-            <a href="#security" className="transition-colors hover:text-foreground">Security</a>
+          <div className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
+            <a href="#features" className="transition-colors hover:text-foreground">{nav.features}</a>
+            <a href="#how-it-works" className="transition-colors hover:text-foreground">{nav.howItWorks}</a>
+            <a href="#pricing" className="transition-colors hover:text-foreground">{nav.pricing}</a>
+            <a href="#faq" className="transition-colors hover:text-foreground">{nav.faq}</a>
           </div>
         )}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* only the home page has hindi words so far */}
+          {onHome && (
+            <Button variant="ghost" size="sm" onClick={() => setLanguage(language === 'en' ? 'hi' : 'en')} aria-label={nav.switchLabel} lang={language === 'en' ? 'hi' : 'en'}>
+              <Languages />{nav.switchTo}
+            </Button>
+          )}
           <ThemeToggle />
           {loading ? (
             <div className="h-9 w-24" />
@@ -50,10 +62,10 @@ function SiteHeader() {
           ) : (
             <>
               <Button asChild variant="ghost" className="hidden sm:inline-flex">
-                <Link to="/sign-in">Sign in</Link>
+                <Link to="/sign-in">{nav.signIn}</Link>
               </Button>
               <Button asChild>
-                <Link to="/sign-up">Enlist</Link>
+                <Link to="/sign-up">{nav.tryFree}</Link>
               </Button>
             </>
           )}
@@ -64,18 +76,20 @@ function SiteHeader() {
 }
 
 function SiteFooter() {
+  const { language } = useLanguage()
+  const footer = homeCopy[language].footer
+
   return (
-    <footer className="border-t border-border/70">
+    <footer lang={language} className="border-t border-border/70">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:px-6">
-        <p className="font-display tracking-[0.2em] uppercase">
-          © {new Date().getFullYear()} CKAuth · Hold the wall
-          {/* "dedicate your hearts": the salute, for whoever notices */}
-          <span lang="ja" title="Dedicate your hearts" className="ml-3 tracking-normal normal-case">心臓を捧げよ</span>
-        </p>
+        <div className="text-center sm:text-left">
+          <p>© {new Date().getFullYear()} CKAuth · {footer.tagline}</p>
+          <p className="mt-1">{footer.question} <a href={`mailto:${CONTACT_EMAIL}`} className="text-foreground underline underline-offset-4">{CONTACT_EMAIL}</a></p>
+        </div>
         <div className="flex gap-5">
-          <Link to="/sign-in" className="hover:text-foreground">Sign in</Link>
-          <Link to="/sign-up" className="hover:text-foreground">Create account</Link>
-          <Link to="/forgot-password" className="hover:text-foreground">Recover access</Link>
+          <Link to="/sign-in" className="hover:text-foreground">{footer.signIn}</Link>
+          <Link to="/sign-up" className="hover:text-foreground">{footer.createAccount}</Link>
+          <Link to="/forgot-password" className="hover:text-foreground">{footer.forgot}</Link>
         </div>
       </div>
     </footer>

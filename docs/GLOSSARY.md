@@ -203,6 +203,12 @@ Plain definitions of the terms used across CKAuth's docs ([README](../README.md)
 
 **Design lab.** CKAuth's development-only switcher for comparing candidate designs on the real pages (`frontend/src/lib/design-lab.tsx`).
 
+**Devanagari.** The script Hindi is written in. Its letters hang from a line along the top (the *shirorekha*) and carry marks above and below, so it needs taller lines than English.
+
+**`lang` attribute.** Tells the browser (and screen readers) which language a piece of the page is in, e.g. `lang="hi"`. CSS can then style that language with `:lang(hi)`.
+
+**`unicode-range` / `size-adjust`.** Two `@font-face` settings. `unicode-range` makes the browser download a font only when the page shows characters in that range (here, Hindi). `size-adjust` scales one font so it matches the size of the fonts around it.
+
 ---
 
 ## Hosting and deployment
