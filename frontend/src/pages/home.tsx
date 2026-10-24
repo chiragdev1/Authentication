@@ -307,13 +307,31 @@ function Faq({ copy }: { copy: HomeCopy }) {
                 {item.q}
                 <ChevronDown className="size-5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
-              <p className="mt-3 leading-relaxed text-muted-foreground">{item.a}</p>
+              <FaqAnswer item={item} />
             </details>
           ))}
         </div>
       </div>
     </section>
   )
+}
+
+type FaqItem = HomeCopy['faq']['items'][number]
+
+// a faint bubble, like a chat reply: the tint, the shape and the bold short answer set it apart from the question
+function FaqAnswer({ item }: { item: FaqItem }) {
+  return (
+    <p className="mt-3 rounded-2xl rounded-tl-sm bg-primary/5 px-4 py-3 leading-relaxed">
+      <strong className="font-semibold">{item.lead}</strong> <WithEmailLink text={item.a} />
+    </p>
+  )
+}
+
+// the help answer names the contact email; make it a link wherever it appears
+function WithEmailLink({ text }: { text: string }) {
+  const [before, after] = text.split(CONTACT_EMAIL)
+  if(after === undefined) return text
+  return <>{before}<a href={`mailto:${CONTACT_EMAIL}`} className="font-medium text-foreground underline underline-offset-4">{CONTACT_EMAIL}</a>{after}</>
 }
 
 function FinalCall({ copy }: { copy: HomeCopy }) {

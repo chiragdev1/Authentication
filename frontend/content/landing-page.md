@@ -163,8 +163,19 @@ Notes on the placeholder plans:
 
 ## 9. Good to know (FAQ)
 
-| EN question | EN answer | HI question | HI answer |
-|---|---|---|---|
+Each answer starts with a short reply in bold, then the detail. On the page, the answer sits in a faint bubble under the question.
+
+| EN question | EN short answer | EN detail | HI question | HI short answer | HI detail |
+|---|---|---|---|---|---|
+| Do I need to know coding? | No. | Your customers just see a simple, safe login. | क्या मुझे कोडिंग आनी चाहिए? | नहीं। | आपके ग्राहकों को बस आसान और सुरक्षित लॉगिन दिखता है। |
+| Can you see my customers' passwords? | No, never. | They're stored in a secret code nobody can read, including us. | क्या आप मेरे ग्राहकों के पासवर्ड देख सकते हैं? | नहीं, कभी नहीं। | वे ऐसे गुप्त कोड में रहते हैं जिसे कोई नहीं पढ़ सकता, हम भी नहीं। |
+| What if a customer forgets their password? | They fix it themselves. | An email link lets them choose a new password. No call to you. | अगर ग्राहक पासवर्ड भूल जाए तो? | वह खुद ठीक कर लेता है। | ईमेल लिंक से नया पासवर्ड चुन सकता है। आपको फ़ोन नहीं करना पड़ता। |
+| What if a customer loses their phone? | Change the password. | Every other phone and computer is logged out at once. | अगर ग्राहक का फ़ोन खो जाए तो? | पासवर्ड बदल दें। | बाकी सभी फ़ोन और कंप्यूटर तुरंत लॉग-आउट हो जाते हैं। |
+| Does it work on mobile? | Yes. | On every phone, tablet and computer. | क्या यह मोबाइल पर चलता है? | हाँ। | हर फ़ोन, टैबलेट और कंप्यूटर पर। |
+| How much does it cost? | Free for now. | Paid plans will start later at ₹99/month or ₹999/year, and there will always be a free plan. | इसकी कीमत क्या है? | अभी मुफ़्त है। | पेड प्लान बाद में ₹99/महीना या ₹999/साल से शुरू होंगे, और मुफ़्त प्लान हमेशा रहेगा। |
+| How do I get help? | Email us. | Write to chiragaroradev@gmail.com. | मदद कैसे मिलेगी? | हमें ईमेल करें। | chiragaroradev@gmail.com पर लिखें। |
+
+---|---|---|---|
 | Do I need to know coding? | No. Your customers just see a simple, safe login. | क्या मुझे कोडिंग आनी चाहिए? | नहीं। आपके ग्राहकों को बस आसान और सुरक्षित लॉगिन दिखता है। |
 | Can you see my customers' passwords? | No. They're stored in a secret code nobody can read, including us. | क्या आप मेरे ग्राहकों के पासवर्ड देख सकते हैं? | नहीं। वे ऐसे गुप्त कोड में रहते हैं जिसे कोई नहीं पढ़ सकता, हम भी नहीं। |
 | What if a customer forgets their password? | They reset it themselves with an email link. No call to you. | अगर ग्राहक पासवर्ड भूल जाए तो? | वह ईमेल लिंक से खुद रीसेट कर लेता है। आपको फ़ोन नहीं करना पड़ता। |
